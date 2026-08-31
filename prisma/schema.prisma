@@ -1,0 +1,364 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CLIENT
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  IN_TRANSIT
+  DELIVERED
+  CANCELED
+}
+
+model User {
+  id        String          @id @default(uuid())
+  name      String
+  email     String          @unique
+  password  String
+  phone     String?
+  cpf       String?        
+  birthDate String?    
+  address   String?     
+  role      Role            @default(CLIENT)
+  isBlocked Boolean         @default(false)
+  resetCode          String?
+  resetCodeExpires   DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  cashback  CashbackWallet?
+  orders    Order[]
+  accessLogs  AccessLog[]
+  accountMovements CustomerAccountMovement[] 
+}
+
+model CustomerAccountMovement {
+  id          String   @id @default(uuid())
+  customerId  String
+  customer    User     @relation(fields: [customerId], references: [id])
+  type        String   
+  amount      Float
+  description String
+  isPaid      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  paidAt      DateTime?
+}
+
+model CashbackWallet {
+  id        String   @id @default(uuid())
+  balance   Decimal  @default(0.00)
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  order     Int       @default(0) 
+  isDrink   Boolean   @default(false) // 🚨 NOVO: Identificador para o KDS separar bebidas da Cozinha
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id            String         @id @default(uuid())
+  name          String
+  description   String?
+  price         Decimal        @db.Decimal(10, 2)
+  price700g     Decimal?       @db.Decimal(10, 2)
+  price1kg      Decimal?       @db.Decimal(10, 2)
+  costPrice     Float          @default(0)
+  imageUrl      String?
+  isActive      Boolean        @default(true)
+  isFeatured    Boolean        @default(false)
+  categoryId    String
+  order         Int            @default(0)
+  category      Category       @relation(fields: [categoryId], references: [id])
+  items         OrderItem[]
+  tabItems      TabItem[]      // 🚨 CORREÇÃO AQUI: Relacionamento reverso obrigatório do Prisma
+  ncm           String?  
+  ean           String?  
+  regraFiscalId String?  
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  fichasTecnicas FichaTecnica[]
+  groupId   String?
+  group     ProductGroup? @relation(fields: [groupId], references: [id])
+}
+
+model ProductGroup {
+  id        String    @id @default(uuid())
+  name      String    
+  printerId String?
+  regraFiscalId String?
+  printer   Printer?  @relation(fields: [printerId], references: [id])
+  products  Product[]
+}
+
+model Order {
+  id                String      @id @default(uuid())
+  shortId           Int         @default(autoincrement())
+  total             Decimal
+  deliveryFee       Decimal     @default(0.00)
+  cashbackUsed      Decimal     @default(0.00)
+  cashbackGenerated Decimal     @default(0.00)
+  couponCode        String?   
+  couponDiscount    Decimal     @default(0.00)
+  paymentMethod     String
+  address           String
+  status            OrderStatus @default(PENDING)
+  clientId          String
+  client            User        @relation(fields: [clientId], references: [id])
+  items             OrderItem[]
+  origin       String?   @default("APP") 
+  shiftId      String?
+  shift        Shift?    @relation(fields: [shiftId], references: [id])
+  registerId   String?
+  register     CashRegister? @relation(fields: [registerId], references: [id])
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  nfceData          String?
+  waiter            String?
+  deliveryPersonId String?
+  deliveryPerson   Employee? @relation(fields: [deliveryPersonId], references: [id])
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  quantity  Int
+  price     Decimal
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+}
+
+model SystemConfig {
+  id    String @id
+  data  String
+}
+
+model Avaliacao {
+  id          String   @id @default(uuid())
+  clienteNome String
+  nota        Int      
+  comentario  String
+  dataCriacao DateTime @default(now())
+}
+
+model Insumo {
+  id          String   @id @default(cuid())
+  name        String   
+  unit        String   
+  stock       Float    @default(0) 
+  cost        Float    @default(0) 
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  fichas      FichaTecnica[]
+  movimentos  MovimentacaoEstoque[]
+}
+
+model FichaTecnica {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  insumoId    String
+  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  quantity    Float    
+  @@unique([productId, insumoId]) 
+}
+
+model MovimentacaoEstoque {
+  id          String   @id @default(cuid())
+  insumoId    String
+  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  type        String   
+  quantity    Float
+  reason      String?  
+  xmlRef      String?  
+  createdAt   DateTime @default(now())
+}
+
+model Settings {
+  id              String   @id @default(cuid())
+  isManualFechado Boolean  @default(false)
+  deliveryFee     Float    @default(0)
+  cashbackPercent Int      @default(0)
+  schedule        Json?    
+}
+
+model FiscalConfig {
+  id        String @id @default(cuid())
+  icms      Json?  @default("[]")
+  pisCofins Json?  @default("[]")
+  regras    Json?  @default("[]")
+}
+
+model AccessLog {
+  id        String   @id @default(uuid())
+  ip        String?
+  device    String?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+model Receita {
+  id           String   @id @default(uuid())
+  nome         String
+  ingredientes String   
+  preparo      String
+  criadoEm     DateTime @default(now())
+}
+
+model AccessProfile {
+  id          String     @id @default(uuid())
+  name        String     @unique 
+  permissions String     
+  employees   Employee[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Employee {
+  id             String        @id @default(uuid())
+  name           String
+  cpf            String        @unique
+  age            String?
+  address        String?
+  email          String        @unique
+  phone          String?
+  password       String
+  role           String        
+  profileId      String
+  profile        AccessProfile @relation(fields: [profileId], references: [id])
+  isActive       Boolean       @default(true)
+  receivesTips   Boolean       @default(false) 
+  creditLimit    Float         @default(0.0)    
+  discountPercent Float        @default(0.0)    
+  logs           EmployeeLog[] 
+  accountMovements EmployeeAccountMovement[] 
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  facePhoto      String?   @db.Text  
+  lastFaceLogin  DateTime?           
+  deliveries     Order[]
+}
+
+model EmployeeAccountMovement {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  type        String   
+  amount      Float
+  description String
+  isPaid      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  paidAt      DateTime?
+}
+
+model EmployeeLog {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  action      String   
+  details     String?  
+  createdAt   DateTime @default(now())
+}
+
+model Shift {
+  id          String         @id @default(uuid())
+  openedAt    DateTime       @default(now())
+  closedAt    DateTime?
+  status      String         @default("OPEN") 
+  openedBy    String?        
+  closedBy    String?
+  registers   CashRegister[]
+  orders      Order[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model CashRegister {
+  id             String         @id @default(uuid())
+  shiftId        String
+  shift          Shift          @relation(fields: [shiftId], references: [id])
+  openedBy       String         
+  closedBy       String?
+  openedAt       DateTime       @default(now())
+  closedAt       DateTime?
+  status         String         @default("OPEN") 
+  openingBalance Float          @default(0.0) 
+  closingBalance Float?
+  closingDetails String?       
+  movements      CashMovement[]
+  orders         Order[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model CashMovement {
+  id             String       @id @default(uuid())
+  registerId     String
+  register       CashRegister @relation(fields: [registerId], references: [id])
+  type           String       
+  amount         Float
+  reason         String
+  authorizedBy   String       
+  createdAt      DateTime     @default(now())
+}
+
+model RestaurantTab {
+  id           String    @id @default(uuid())
+  number       Int       
+  type         String    
+  status       String    @default("OPEN") 
+  customerName String?   
+  customerCpf  String?
+  parentTable  Int?      
+  seatLabel    String?   
+  openedBy     String    
+  shiftId      String    
+  items        TabItem[]
+  createdAt    DateTime  @default(now())
+  linkedTable  Int?
+  updatedAt    DateTime  @updatedAt
+}
+
+model TabItem {
+  id          String        @id @default(uuid())
+  tabId       String
+  tab         RestaurantTab @relation(fields: [tabId], references: [id])
+  productId   String
+  name        String
+  price       Float
+  quantity    Int
+  observation String?
+  seatLabel   String?       
+  status      String        @default("PENDING") 
+  createdAt   DateTime      @default(now())
+  product     Product       @relation(fields: [productId], references: [id]) 
+}
+
+model Printer {
+  id        String         @id @default(uuid())
+  name      String
+  type      String         @default("USB") 
+  address   String         
+  groups    ProductGroup[]
+}
