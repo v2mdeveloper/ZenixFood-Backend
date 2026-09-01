@@ -972,32 +972,43 @@ app.post("/api/rh/delivery-persons/register", async (req, res) => {
 app.post("/api/auth/employee/login", async (req, res) => {
   const { email, password } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+
   try {
+    // Busca o funcionário amarrado à loja atual (passada pelo header x-store-id)
     const employee = await prisma.employee.findFirst({
-      where: { storeId: req.storeId, OR: [{ email: email }, { cpf: email }] }, // 🚨 SAAS FILTER
+      where: { 
+        storeId: req.storeId, 
+        OR: [{ email: email }, { cpf: email }] 
+      },
       include: { profile: true },
     });
-    if (!employee || !(await bcrypt.compare(password, employee.password)))
-      return res.status(401).json({ error: "Inválido." });
-    if (!employee.isActive) return res.status(403).json({ error: "Inativo." });
-    
-    if (employee.role.toLowerCase().includes("entregador") && employee.facePhoto) {
-      const today = new Date().toISOString().split("T")[0];
-      const lastLogin = employee.lastFaceLogin ? new Date(employee.lastFaceLogin).toISOString().split("T")[0] : null;
-      if (lastLogin !== today) {
-        return res.json({ success: true, needsFaceValidation: true, employeeId: employee.id });
-      }
+
+    if (!employee || !(await bcrypt.compare(password, employee.password))) {
+      return res.status(401).json({ error: "Credenciais inválidas." });
     }
+
+    if (!employee.isActive) {
+      return res.status(403).json({ error: "Usuário inativo." });
+    }
+
     const token = jwt.sign(
       { id: employee.id, role: "EMPLOYEE", profile: employee.role, storeId: req.storeId },
       JWT_SECRET, { expiresIn: "12h" }
     );
+
     res.status(200).json({
-        success: true, token,
-        employee: { id: employee.id, name: employee.name, role: employee.role, permissions: JSON.parse(employee.profile.permissions) },
-      });
+      success: true,
+      token,
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+        permissions: employee.profile?.permissions ? JSON.parse(employee.profile.permissions) : ["gestao"]
+      },
+    });
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("Erro no login do funcionário:", error);
+    res.status(500).json({ error: "Erro interno no servidor." });
   }
 });
 app.post("/api/auth/employee/face-login-verify", async (req, res) => {
