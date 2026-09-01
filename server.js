@@ -476,6 +476,46 @@ app.delete("/api/admin/suppliers/:id", async (req, res) => {
   }
 });
 
+// ROTA: DADOS DA EMPRESA E ASSINATURA (SaaS)
+app.get('/api/admin/store-info', async (req, res) => {
+  try {
+    // Puxa o ID da loja injetado pelo wrapper no front-end
+    const storeId = req.headers['x-store-id'];
+
+    if (!storeId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'ID da loja não fornecido no cabeçalho.' 
+      });
+    }
+
+    // Busca a loja diretamente no banco de dados com Prisma
+    const store = await prisma.store.findUnique({
+      where: { id: storeId }
+    });
+
+    if (!store) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Loja não encontrada no banco de dados.' 
+      });
+    }
+
+    // Retorna os dados oficiais da loja para alimentar a tela "Minha Empresa"
+    res.json({ 
+      success: true, 
+      store: store 
+    });
+
+  } catch (error) {
+    console.error('Erro ao buscar dados da empresa:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Erro interno no servidor ao buscar dados da empresa.' 
+    });
+  }
+});
+
 // AUTH ADMIN & CLIENTES (SaaS)
 app.put("/api/auth/admin/profile", async (req, res) => {
   const { name, email, password } = req.body;
