@@ -28,6 +28,29 @@ app.put("/api/master/stores/:id/modules", MasterAdminController.updateStoreModul
 const storeMiddleware = require("./middlewares/storeMiddleware");
 const tenantMiddleware = require("./middlewares/tenantMiddleware");
 
+// ROTA PARA BUSCAR LOJA PELO SLUG (SaaS)
+app.get("/api/stores/slug/:slug", async (req, res) => {
+  try {
+    const store = await prisma.store.findUnique({
+      where: { slug: req.params.slug },
+      select: { 
+        id: true, 
+        name: true, 
+        activeDelivery: true, 
+        activeTotem: true 
+      }
+    });
+
+    if (!store) {
+      return res.status(404).json({ error: "Loja não encontrada." });
+    }
+
+    res.json({ success: true, store });
+  } catch (error) {
+    res.status(500).json({ error: "Erro interno." });
+  }
+});
+
 app.use(storeMiddleware);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
@@ -50,7 +73,7 @@ app.use((req, res, next) => {
   
   if (storeId) {
     req.storeId = storeId;
-    
+
     req.headers["x-store-id"] = storeId; // Força no header para o tenantMiddleware ler
   }
   
