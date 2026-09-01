@@ -9,6 +9,7 @@ const { PrismaPg } = require("@prisma/adapter-pg");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
+const MasterAdminController = require("./controllers/MasterAdminController");
 const upload = multer({ storage: multer.memoryStorage() });
 const connectionString = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString });
@@ -21,7 +22,12 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+app.get("/api/master/stores", MasterAdminController.listAllStores);
+app.put("/api/master/stores/:id/modules", MasterAdminController.updateStoreModules);
+
 const storeMiddleware = require("./middlewares/storeMiddleware");
+const tenantMiddleware = require("./middlewares/tenantMiddleware");
+
 app.use(storeMiddleware);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
@@ -30,10 +36,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
 app.use((req, res, next) => {
   if (req.path === "/api/webhook") return next();
   
-  // 1. Tenta pegar pelo cabeçalho ou parâmetro da URL
   let storeId = req.headers["x-store-id"] || req.query.storeId;
   
-  // 2. Se não veio no header, tenta extrair automaticamente do Token JWT (Bearer Token)
   if (!storeId && req.headers.authorization) {
     try {
       const token = req.headers.authorization.split(" ")[1];
@@ -41,17 +45,19 @@ app.use((req, res, next) => {
       if (decoded && decoded.storeId) {
         storeId = decoded.storeId;
       }
-    } catch (err) {
-      // Token inválido ou expirado, prossegue sem storeId
-    }
+    } catch (err) {}
   }
-
+  
   if (storeId) {
     req.storeId = storeId;
+    
+    req.headers["x-store-id"] = storeId; // Força no header para o tenantMiddleware ler
   }
   
   next();
 });
+
+//app.use(tenantMiddleware);
 
 // FUNÇÕES AUXILIARES SAAS (Buscando configurações no BD por Loja)
 async function getSettings(storeId) {

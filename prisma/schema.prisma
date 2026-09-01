@@ -12,20 +12,41 @@ datasource db {
 // SAAS CORE: MODELO DE LOJAS (TENANTS)
 
 model Store {
-  id          String   @id @default(uuid())
-  name        String   // Ex: Cânone Burger, Pizzaria do João
-  slug        String   @unique // Ex: canone-burger (para url própria)
-  document    String?  // CNPJ da Loja
-  isActive    Boolean  @default(true)
+  id                   String    @id @default(uuid())
+  name                 String
+  documentCnpj         String?   @unique
+  email                String?   @unique
+  phone                String?
+  
+  // 🧩 MÓDULOS CONTRATADOS (O que o lojista tem direito de usar)
+  activeDelivery       Boolean   @default(true)
+  activeTotem          Boolean   @default(false)
+  activeKds            Boolean   @default(false)
+  activeFiscal         Boolean   @default(false)
 
-// 🔑 CREDENCIAIS ESPECÍFICAS DO INQUILINO (TENANT)
-  mpAccessToken   String?  // Token do Mercado Pago da loja
-  focusToken      String?  // Token da Focus NFe da loja
-  focusEnv        String?  @default("homologacao") // "homologacao" ou "producao"
-  jwtSecretStore  String?  // Secret de JWT específico da loja (opcional, ou usa um global)
+  // 💰 GESTÃO DE ASSINATURA (SaaS)
+  monthlyFee           Float     @default(0.00)
+  subscriptionStatus   String    @default("TRIAL") // TRIAL, ACTIVE, OVERDUE, BLOCKED
+  subscriptionDueDate  DateTime? 
+  
+  // 🔑 CHAVES DE INTEGRAÇÃO INDIVIDUAIS
+  mpPublicKey          String?   // Mercado Pago Front
+  mpAccessToken        String?   // Mercado Pago Back
+  focusEnv             String    @default("homologacao") // homologacao ou producao
+  focusToken           String?   // Token da Focus NFe da loja
+  
+  // ⚙️ CONFIGURAÇÕES DA LOJA
+  deliveryFee          Float     @default(0.00)
+  cashbackPercent      Float     @default(0.00)
+  isManualFechado      Boolean   @default(false)
+  youtubeLiveId        String?
+  aboutUsText          String?
+  promoBannerUrl       String?
+  promoBannerLink      String?
+  schedule             Json?     // Agenda de funcionamento
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   // 🔗 RELACIONAMENTOS REVERSOS (Tudo o que pertence a esta loja)
   users         User[]
