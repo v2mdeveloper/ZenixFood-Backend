@@ -17,6 +17,13 @@ model Store {
   slug        String   @unique // Ex: canone-burger (para url própria)
   document    String?  // CNPJ da Loja
   isActive    Boolean  @default(true)
+
+// 🔑 CREDENCIAIS ESPECÍFICAS DO INQUILINO (TENANT)
+  mpAccessToken   String?  // Token do Mercado Pago da loja
+  focusToken      String?  // Token da Focus NFe da loja
+  focusEnv        String?  @default("homologacao") // "homologacao" ou "producao"
+  jwtSecretStore  String?  // Secret de JWT específico da loja (opcional, ou usa um global)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
