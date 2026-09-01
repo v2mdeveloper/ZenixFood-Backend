@@ -8,6 +8,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
+// SAAS CORE: MODELO DE LOJAS (TENANTS)
+
+model Store {
+  id          String   @id @default(uuid())
+  name        String   // Ex: Cânone Burger, Pizzaria do João
+  slug        String   @unique // Ex: canone-burger (para url própria)
+  document    String?  // CNPJ da Loja
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // 🔗 RELACIONAMENTOS REVERSOS (Tudo o que pertence a esta loja)
+  users         User[]
+  categories    Category[]
+  products      Product[]
+  productGroups ProductGroup[]
+  orders        Order[]
+  systemConfigs SystemConfig[]
+  avaliacoes    Avaliacao[]
+  insumos       Insumo[]
+  settings      Settings[]
+  fiscalConfigs FiscalConfig[]
+  receitas      Receita[]
+  profiles      AccessProfile[]
+  employees     Employee[]
+  shifts        Shift[]
+  tabs          RestaurantTab[]
+  printers      Printer[]
+}
+
 enum Role {
   CLIENT
   ADMIN
@@ -22,25 +53,36 @@ enum OrderStatus {
   CANCELED
 }
 
+// =================================================================
+// MODELOS DE DADOS (ISOLADOS POR LOJA)
+// =================================================================
+
 model User {
-  id        String          @id @default(uuid())
-  name      String
-  email     String          @unique
-  password  String
-  phone     String?
-  cpf       String?        
-  birthDate String?    
-  address   String?     
-  role      Role            @default(CLIENT)
-  isBlocked Boolean         @default(false)
-  resetCode          String?
-  resetCodeExpires   DateTime?
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  cashback  CashbackWallet?
-  orders    Order[]
-  accessLogs  AccessLog[]
+  id               String   @id @default(uuid())
+  storeId          String
+  store            Store    @relation(fields: [storeId], references: [id])
+  
+  name             String
+  email            String   
+  password         String
+  phone            String?
+  cpf              String?  
+  birthDate        String?  
+  address          String?  
+  role             Role     @default(CLIENT)
+  isBlocked        Boolean  @default(false)
+  resetCode        String?
+  resetCodeExpires DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  cashback         CashbackWallet?
+  orders           Order[]
+  accessLogs       AccessLog[]
   accountMovements CustomerAccountMovement[] 
+
+  // SaaS: O mesmo email pode existir no banco, mas apenas uma vez por Loja
+  @@unique([email, storeId])
 }
 
 model CustomerAccountMovement {
@@ -65,17 +107,26 @@ model CashbackWallet {
 
 model Category {
   id        String    @id @default(uuid())
+  storeId   String
+  store     Store     @relation(fields: [storeId], references: [id])
+
   name      String
-  slug      String    @unique
+  slug      String    
   order     Int       @default(0) 
-  isDrink   Boolean   @default(false) // 🚨 NOVO: Identificador para o KDS separar bebidas da Cozinha
+  isDrink   Boolean   @default(false)
   products  Product[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  // SaaS: O mesmo slug pode existir em lojas diferentes
+  @@unique([slug, storeId])
 }
 
 model Product {
   id            String         @id @default(uuid())
+  storeId       String
+  store         Store          @relation(fields: [storeId], references: [id])
+
   name          String
   description   String?
   price         Decimal        @db.Decimal(10, 2)
@@ -89,28 +140,34 @@ model Product {
   order         Int            @default(0)
   category      Category       @relation(fields: [categoryId], references: [id])
   items         OrderItem[]
-  tabItems      TabItem[]      // 🚨 CORREÇÃO AQUI: Relacionamento reverso obrigatório do Prisma
+  tabItems      TabItem[]      
   ncm           String?  
   ean           String?  
   regraFiscalId String?  
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   fichasTecnicas FichaTecnica[]
-  groupId   String?
-  group     ProductGroup? @relation(fields: [groupId], references: [id])
+  groupId       String?
+  group         ProductGroup?  @relation(fields: [groupId], references: [id])
 }
 
 model ProductGroup {
-  id        String    @id @default(uuid())
-  name      String    
-  printerId String?
+  id            String    @id @default(uuid())
+  storeId       String
+  store         Store     @relation(fields: [storeId], references: [id])
+
+  name          String  
+  printerId     String?
   regraFiscalId String?
-  printer   Printer?  @relation(fields: [printerId], references: [id])
-  products  Product[]
+  printer       Printer?  @relation(fields: [printerId], references: [id])
+  products      Product[]
 }
 
 model Order {
   id                String      @id @default(uuid())
+  storeId           String
+  store             Store       @relation(fields: [storeId], references: [id])
+
   shortId           Int         @default(autoincrement())
   total             Decimal
   deliveryFee       Decimal     @default(0.00)
@@ -124,17 +181,17 @@ model Order {
   clientId          String
   client            User        @relation(fields: [clientId], references: [id])
   items             OrderItem[]
-  origin       String?   @default("APP") 
-  shiftId      String?
-  shift        Shift?    @relation(fields: [shiftId], references: [id])
-  registerId   String?
-  register     CashRegister? @relation(fields: [registerId], references: [id])
+  origin            String?     @default("APP") 
+  shiftId           String?
+  shift             Shift?      @relation(fields: [shiftId], references: [id])
+  registerId        String?
+  register          CashRegister? @relation(fields: [registerId], references: [id])
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   nfceData          String?
   waiter            String?
-  deliveryPersonId String?
-  deliveryPerson   Employee? @relation(fields: [deliveryPersonId], references: [id])
+  deliveryPersonId  String?
+  deliveryPerson    Employee?   @relation(fields: [deliveryPersonId], references: [id])
 }
 
 model OrderItem {
@@ -148,12 +205,16 @@ model OrderItem {
 }
 
 model SystemConfig {
-  id    String @id
-  data  String
+  id      String @id
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id])
+  data    String
 }
 
 model Avaliacao {
   id          String   @id @default(uuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id])
   clienteNome String
   nota        Int      
   comentario  String
@@ -161,41 +222,48 @@ model Avaliacao {
 }
 
 model Insumo {
-  id          String   @id @default(cuid())
-  name        String   
-  unit        String   
-  stock       Float    @default(0) 
-  cost        Float    @default(0) 
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  fichas      FichaTecnica[]
-  movimentos  MovimentacaoEstoque[]
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id])
+
+  name       String   
+  unit       String   
+  stock      Float    @default(0) 
+  cost       Float    @default(0) 
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  fichas     FichaTecnica[]
+  movimentos MovimentacaoEstoque[]
 }
 
 model FichaTecnica {
-  id          String   @id @default(cuid())
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  insumoId    String
-  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
-  quantity    Float    
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  insumoId  String
+  insumo    Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  quantity  Float    
+  
   @@unique([productId, insumoId]) 
 }
 
 model MovimentacaoEstoque {
-  id          String   @id @default(cuid())
-  insumoId    String
-  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
-  type        String   
-  quantity    Float
-  reason      String?  
-  xmlRef      String?  
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  insumoId  String
+  insumo    Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  type      String   
+  quantity  Float
+  reason    String?  
+  xmlRef    String?  
+  createdAt DateTime @default(now())
 }
 
 model Settings {
   id              String   @id @default(cuid())
+  storeId         String
+  store           Store    @relation(fields: [storeId], references: [id])
+
   isManualFechado Boolean  @default(false)
   deliveryFee     Float    @default(0)
   cashbackPercent Int      @default(0)
@@ -204,6 +272,9 @@ model Settings {
 
 model FiscalConfig {
   id        String @id @default(cuid())
+  storeId   String
+  store     Store  @relation(fields: [storeId], references: [id])
+
   icms      Json?  @default("[]")
   pisCofins Json?  @default("[]")
   regras    Json?  @default("[]")
@@ -220,6 +291,9 @@ model AccessLog {
 
 model Receita {
   id           String   @id @default(uuid())
+  storeId      String
+  store        Store    @relation(fields: [storeId], references: [id])
+
   nome         String
   ingredientes String   
   preparo      String
@@ -227,37 +301,50 @@ model Receita {
 }
 
 model AccessProfile {
-  id          String     @id @default(uuid())
-  name        String     @unique 
+  id         String     @id @default(uuid())
+  storeId    String
+  store      Store      @relation(fields: [storeId], references: [id])
+
+  name       String     
   permissions String     
-  employees   Employee[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  employees  Employee[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([name, storeId])
 }
 
 model Employee {
-  id             String        @id @default(uuid())
-  name           String
-  cpf            String        @unique
-  age            String?
-  address        String?
-  email          String        @unique
-  phone          String?
-  password       String
-  role           String        
-  profileId      String
-  profile        AccessProfile @relation(fields: [profileId], references: [id])
-  isActive       Boolean       @default(true)
-  receivesTips   Boolean       @default(false) 
-  creditLimit    Float         @default(0.0)    
-  discountPercent Float        @default(0.0)    
-  logs           EmployeeLog[] 
+  id              String   @id @default(uuid())
+  storeId         String
+  store           Store    @relation(fields: [storeId], references: [id])
+
+  name            String
+  cpf             String   
+  age             String?
+  address         String?
+  email           String   
+  phone           String?
+  password        String
+  role            String   
+  profileId       String
+  profile         AccessProfile @relation(fields: [profileId], references: [id])
+  isActive        Boolean  @default(true)
+  receivesTips    Boolean  @default(false) 
+  creditLimit     Float    @default(0.0)    
+  discountPercent Float    @default(0.0)    
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  facePhoto       String?  @db.Text  
+  lastFaceLogin   DateTime?            
+
+  logs             EmployeeLog[] 
   accountMovements EmployeeAccountMovement[] 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  facePhoto      String?   @db.Text  
-  lastFaceLogin  DateTime?           
-  deliveries     Order[]
+  deliveries       Order[]
+
+  // SaaS: O mesmo CPF/Email pode trabalhar em restaurantes diferentes (ex: Entregador/Freelancer)
+  @@unique([cpf, storeId])
+  @@unique([email, storeId])
 }
 
 model EmployeeAccountMovement {
@@ -273,25 +360,28 @@ model EmployeeAccountMovement {
 }
 
 model EmployeeLog {
-  id          String   @id @default(uuid())
-  employeeId  String
-  employee    Employee @relation(fields: [employeeId], references: [id])
-  action      String   
-  details     String?  
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  action     String   
+  details    String?  
+  createdAt  DateTime @default(now())
 }
 
 model Shift {
-  id          String         @id @default(uuid())
-  openedAt    DateTime       @default(now())
-  closedAt    DateTime?
-  status      String         @default("OPEN") 
-  openedBy    String?        
-  closedBy    String?
-  registers   CashRegister[]
-  orders      Order[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id        String   @id @default(uuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id])
+
+  openedAt  DateTime @default(now())
+  closedAt  DateTime?
+  status    String   @default("OPEN") 
+  openedBy  String?  
+  closedBy  String?
+  registers CashRegister[]
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model CashRegister {
@@ -305,7 +395,7 @@ model CashRegister {
   status         String         @default("OPEN") 
   openingBalance Float          @default(0.0) 
   closingBalance Float?
-  closingDetails String?       
+  closingDetails String?        
   movements      CashMovement[]
   orders         Order[]
   createdAt      DateTime       @default(now())
@@ -313,18 +403,21 @@ model CashRegister {
 }
 
 model CashMovement {
-  id             String       @id @default(uuid())
-  registerId     String
-  register       CashRegister @relation(fields: [registerId], references: [id])
-  type           String       
-  amount         Float
-  reason         String
-  authorizedBy   String       
-  createdAt      DateTime     @default(now())
+  id           String       @id @default(uuid())
+  registerId   String
+  register     CashRegister @relation(fields: [registerId], references: [id])
+  type         String       
+  amount       Float
+  reason       String
+  authorizedBy String       
+  createdAt    DateTime     @default(now())
 }
 
 model RestaurantTab {
   id           String    @id @default(uuid())
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id])
+
   number       Int       
   type         String    
   status       String    @default("OPEN") 
@@ -334,10 +427,11 @@ model RestaurantTab {
   seatLabel    String?   
   openedBy     String    
   shiftId      String    
-  items        TabItem[]
-  createdAt    DateTime  @default(now())
   linkedTable  Int?
+  createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
+
+  items        TabItem[]
 }
 
 model TabItem {
@@ -349,7 +443,7 @@ model TabItem {
   price       Float
   quantity    Int
   observation String?
-  seatLabel   String?       
+  seatLabel   String?        
   status      String        @default("PENDING") 
   createdAt   DateTime      @default(now())
   product     Product       @relation(fields: [productId], references: [id]) 
@@ -357,6 +451,9 @@ model TabItem {
 
 model Printer {
   id        String         @id @default(uuid())
+  storeId   String
+  store     Store          @relation(fields: [storeId], references: [id])
+
   name      String
   type      String         @default("USB") 
   address   String         

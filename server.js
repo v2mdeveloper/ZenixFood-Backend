@@ -35,7 +35,7 @@ let memorySettings = {
   cashbackPercent: 2,
   tipPercentage: 10,
   aboutUsText:
-    "Na Cânone Burger & Co., nós não fazemos apenas lanches, nós forjamos experiências...",
+    "Na ZenixFood & Co., nós não fazemos apenas lanches, nós forjamos experiências...",
   schedule: {
     0: { isOpen: true, open: "18:00", close: "23:59" },
     1: { isOpen: false, open: "18:00", close: "23:59" },
@@ -2767,14 +2767,14 @@ app.post("/api/orders", async (req, res) => {
       const paymentData = await payment.create({
         body: {
           transaction_amount: Number(finalTotal.toFixed(2)),
-          description: `Pedido Cânone Burger`,
+          description: `Pedido ZenixFood`,
           payment_method_id: "pix",
           payer: {
             email: mainOrder.client.email || "cliente@email.com",
             first_name: mainOrder.client.name.split(" ")[0] || "Cliente",
           },
           external_reference: externalRef,
-          notification_url: "https://canone-backend.onrender.com/api/webhook",
+          notification_url: "https://zenixfood-backend.onrender.com/api/webhook",
         },
       });
       return res
@@ -2803,7 +2803,7 @@ app.post("/api/orders", async (req, res) => {
         body: {
           transaction_amount: Number(finalTotal.toFixed(2)),
           token: mpData.token,
-          description: `Pedido Cânone Burger`,
+          description: `Pedido ZenixFood`,
           installments: Number(mpData.installments),
           payment_method_id: mpData.payment_method_id,
           issuer_id: mpData.issuer_id,
@@ -2812,7 +2812,7 @@ app.post("/api/orders", async (req, res) => {
             identification: mpData.payer.identification,
           },
           external_reference: externalRef,
-          notification_url: "https://canone-backend.onrender.com/api/webhook",
+          notification_url: "https://zenixfood-backend.onrender.com/api/webhook",
         },
       });
       if (
@@ -2872,14 +2872,14 @@ app.post("/api/orders/:id/retry-pix", async (req, res) => {
     const paymentData = await payment.create({
       body: {
         transaction_amount: Number(order.total),
-        description: `Pedido Cânone Burger`,
+        description: `Pedido ZenixFood`,
         payment_method_id: "pix",
         payer: {
           email: order.client?.email || "cliente@email.com",
           first_name: order.client?.name?.split(" ")[0] || "Cliente",
         },
         external_reference: externalRef,
-        notification_url: "https://canone-backend.onrender.com/api/webhook",
+        notification_url: "https://zenixfood-backend.onrender.com/api/webhook",
       },
     });
 
