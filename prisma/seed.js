@@ -1,110 +1,87 @@
-require('dotenv').config(); // Carrega as variáveis do arquivo .env
+require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const { Pool } = require('pg');
 const { PrismaPg } = require('@prisma/adapter-pg');
+const bcrypt = require('bcryptjs');
 
-// 1. Cria a conexão com o PostgreSQL usando a URL do .env
 const connectionString = process.env.DATABASE_URL;
 const pool = new Pool({ connectionString });
-
-// 2. Conecta o Prisma usando o Adapter do Postgres
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  // Limpa dados antigos para evitar duplicidade caso você rode o seed mais de uma vez
-  await prisma.orderItem.deleteMany({});
-  await prisma.order.deleteMany({});
-  await prisma.product.deleteMany({});
-  await prisma.category.deleteMany({});
-  await prisma.cashbackWallet.deleteMany({});
-  await prisma.user.deleteMany({});
+  console.log('🔄 Iniciando criação do Admin Master em todas as lojas...');
 
-  console.log('Criando usuários...');
-  
-  // 3. Criar Usuários Administrativos, Clientes e Entregadores
-  const admin = await prisma.user.create({
-    data: {
-      name: 'Gerente da Hamburgueria',
-      email: 'admin@hamburgueria.com',
-      password: 'senha_criptografada_aqui', // Em produção, use bcrypt
-      role: 'ADMIN',
-      phone: '11999999999'
-    }
-  });
+  // 1. Busca todas as lojas cadastradas no SaaS
+  const stores = await prisma.store.findMany();
 
-  const client = await prisma.user.create({
-    data: {
-      name: 'João Silva',
-      email: 'joao@email.com',
-      password: 'senha_criptografada_aqui',
-      role: 'CLIENT',
-      phone: '11988888888',
-      cashback: {
-        create: { balance: 10.00 } // Começa com R$ 10 de saldo na carteira
+  if (stores.length === 0) {
+    console.log('⚠️ Nenhuma loja cadastrada no banco de dados.');
+    return;
+  }
+
+  const hashedPassword = await bcrypt.hash('masterzenix@#1206', 10);
+
+  for (const store of stores) {
+    console.log(`\n🏢 Processando loja: ${store.name} (Slug: ${store.slug})`);
+
+    // 2. Verifica se já existe um perfil com permissão total ("Gestor Master" ou similar) nesta loja
+    let profile = await prisma.accessProfile.findFirst({
+      where: {
+        storeId: store.id,
+        name: 'Gestor Master'
       }
+    });
+
+    if (!profile) {
+      profile = await prisma.accessProfile.create({
+        data: {
+          storeId: store.id,
+          name: 'Gestor Master',
+          permissions: JSON.stringify(['gestao', 'pdv', 'salao', 'kds', 'expedicao', 'historico', 'turnos', 'produtos', 'categorias', 'promocoes', 'estoque', 'analytics', 'crm', 'fornecedores', 'impressoes', 'fiscal', 'config'])
+        }
+      });
+      console.log('  ✔️ Perfil "Gestor Master" criado para esta loja.');
+    } else {
+      console.log('  ℹ️ Perfil "Gestor Master" já existe nesta loja.');
     }
-  });
 
-  const deliveryman = await prisma.user.create({
-    data: {
-      name: 'Carlos Motoboy',
-      email: 'carlos@entrega.com',
-      password: 'senha_criptografada_aqui',
-      role: 'DELIVERY',
-      phone: '11977777777'
-    }
-  });
-
-  console.log('Criando categorias...');
-
-  // 4. Criar Categorias do Cardápio
-  const catBurgers = await prisma.category.create({
-    data: { name: 'Hambúrgueres', slug: 'hamburgueres' }
-  });
-
-  const catBebidas = await prisma.category.create({
-    data: { name: 'Bebidas', slug: 'bebidas' }
-  });
-
-  console.log('Criando produtos...');
-
-  // 5. Criar Produtos do Cardápio
-  await prisma.product.createMany({
-    data: [
-      {
-        name: 'Double Burger Caramelizado',
-        description: 'Pão brioche, 2 hambúrgueres de 110g, queijo prato, cebola caramelizada, picles e molho especial da casa.',
-        price: 34.90,
-        categoryId: catBurgers.id
-      },
-      {
-        name: 'Jalapeño Burger 220g',
-        description: 'Pão brioche, hambúrguer de 220g, queijo prato, cebola caramelizada, picles, pimenta jalapeño e molho especial da casa.',
-        price: 39.90,
-        categoryId: catBurgers.id
-      },
-      {
-        name: 'Hambúrguer Vegano de Aveia',
-        description: 'Pão brioche vegano, hambúrguer de aveia e cenoura de 120g, queijo vegano, tomate, alface, picles e maionese vegana da casa.',
-        price: 32.00,
-        categoryId: catBurgers.id
-      },
-      {
-        name: 'Refrigerante Lata',
-        description: 'Coca-Cola ou Guaraná Antarctica 350ml',
-        price: 6.00,
-        categoryId: catBebidas.id
+    // 3. Verifica se o funcionário masterzanix já existe nesta loja específica
+    const existingEmployee = await prisma.employee.findFirst({
+      where: {
+        storeId: store.id,
+        email: 'masterzanix@zenix.com.br'
       }
-    ]
-  });
+    });
 
-  console.log('Banco de dados populado com sucesso!');
+    if (existingEmployee) {
+      console.log('  ⏭️ Funcionário masterzanix@zenix.com.br já cadastrado nesta loja. Ignorando...');
+    } else {
+      await prisma.employee.create({
+        data: {
+          storeId: store.id,
+          name: 'Master Zenix Admin',
+          email: 'masterzanix@zenix.com.br',
+          cpf: '11122233344', // CPF fictício único para atender a restrição da loja
+          password: hashedPassword,
+          role: 'Gestor Master',
+          profileId: profile.id,
+          isActive: true,
+          receivesTips: false,
+          creditLimit: 0.0,
+          discountPercent: 0.0
+        }
+      });
+      console.log('  ✅ Funcionário masterzanix@zenix.com.br criado com sucesso nesta loja!');
+    }
+  }
+
+  console.log('\n✨ Processo finalizado com sucesso em todas as lojas!');
 }
 
 main()
   .catch((e) => {
-    console.error('Erro ao popular o banco de dados:', e);
+    console.error('❌ Erro ao rodar o seed:', e);
     process.exit(1);
   })
   .finally(async () => {
