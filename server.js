@@ -3039,6 +3039,62 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
   }
 });
 
+// ROTAS MASTER: EDIÇÃO E STATUS DA LOJA (SAAS)
+
+// 1. Atualizar todos os dados da empresa e assinatura
+app.put('/api/master/stores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    const updatedStore = await prisma.store.update({
+      where: { id },
+      data: {
+        name: data.name,
+        slug: data.slug,
+        corporateName: data.corporateName,
+        documentCnpj: data.cnpj || data.documentCnpj, // Mapeia corretamente o CNPJ
+        stateRegistration: data.stateRegistration,
+        municipalRegistration: data.municipalRegistration,
+        email: data.companyEmail || data.email,
+        phone: data.companyPhone || data.phone,
+        address: data.address,
+        logoUrl: data.logoUrl,
+        ownerName: data.ownerName,
+        ownerCpf: data.ownerCpf,
+        ownerEmail: data.ownerEmail,
+        ownerPhone: data.ownerPhone,
+        plan: data.plan,
+        monthlyFee: parseFloat(data.monthlyFee) || 0,
+        subscriptionStatus: data.subscriptionStatus,
+      }
+    });
+
+    res.json({ success: true, store: updatedStore });
+  } catch (error) {
+    console.error('Erro ao atualizar loja:', error);
+    res.status(500).json({ success: false, error: 'Erro interno ao atualizar os dados da empresa.' });
+  }
+});
+
+// 2. Alternar Status de Acesso do Sistema (ACTIVE / BLOCKED)
+app.put('/api/master/stores/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const updatedStore = await prisma.store.update({
+      where: { id },
+      data: { status }
+    });
+
+    res.json({ success: true, store: updatedStore });
+  } catch (error) {
+    console.error('Erro ao atualizar status da loja:', error);
+    res.status(500).json({ success: false, error: 'Erro interno ao bloquear/desbloquear a loja.' });
+  }
+});
+
 // START SERVER
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => console.log(`🚀 Servidor ZenixFood SaaS rodando na porta ${PORT}`));
