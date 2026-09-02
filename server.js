@@ -3047,7 +3047,7 @@ app.post('/api/master/stores', async (req, res) => {
   try {
     const data = req.body;
 
-    //Verifica se o slug (URL) já está em uso por outra loja
+    // 1. Verifica se o slug (URL) já está em uso por outra loja
     const existingStore = await prisma.store.findUnique({
       where: { slug: data.slug }
     });
@@ -3059,32 +3059,44 @@ app.post('/api/master/stores', async (req, res) => {
       });
     }
 
-    //Cria a nova loja no banco de dados mapeando os campos do front-end
+    // Função auxiliar para evitar erro de Unique Constraint com strings vazias ("")
+    const cleanEmpty = (value) => (value === undefined || value === null || value.trim() === '') ? null : value;
+
+    // 2. Cria a nova loja no banco de dados mapeando os campos do front-end
     const newStore = await prisma.store.create({
       data: {
         name: data.name,
         slug: data.slug,
-        corporateName: data.corporateName,
-        documentCnpj: data.cnpj,                // Front envia 'cnpj', banco salva 'documentCnpj'
-        stateRegistration: data.stateRegistration,
-        municipalRegistration: data.municipalRegistration,
-        email: data.companyEmail,              // Front envia 'companyEmail', banco salva 'email'
-        phone: data.companyPhone,              // Front envia 'companyPhone', banco salva 'phone'
-        ownerName: data.ownerName,
-        ownerCpf: data.ownerCpf,
-        ownerEmail: data.ownerEmail,
-        ownerPhone: data.ownerPhone,
-        address: data.address,
-        logoUrl: data.logoUrl,
+        corporateName: cleanEmpty(data.corporateName),
+        documentCnpj: cleanEmpty(data.cnpj),                
+        stateRegistration: cleanEmpty(data.stateRegistration),
+        municipalRegistration: cleanEmpty(data.municipalRegistration),
+        email: cleanEmpty(data.companyEmail),              
+        phone: cleanEmpty(data.companyPhone),              
+        ownerName: cleanEmpty(data.ownerName),
+        ownerCpf: cleanEmpty(data.ownerCpf),
+        ownerEmail: cleanEmpty(data.ownerEmail),
+        ownerPhone: cleanEmpty(data.ownerPhone),
+        address: cleanEmpty(data.address),
+        logoUrl: cleanEmpty(data.logoUrl),
         plan: data.plan || 'STANDARD',
-        status: 'ACTIVE',                      // Sistema já nasce liberado
-        subscriptionStatus: 'TRIAL'            // Nasce em período de teste
+        status: 'ACTIVE',                      
+        subscriptionStatus: 'TRIAL'            
       }
     });
 
     res.json({ success: true, store: newStore });
   } catch (error) {
     console.error('Erro ao cadastrar nova loja:', error);
+    
+    // Tratamento específico de erro do Prisma para campos duplicados
+    if (error.code === 'P2002') {
+      return res.status(400).json({ 
+        success: false, 
+        error: `Os dados informados para o campo ${error.meta.target} já estão em uso por outra empresa.` 
+      });
+    }
+
     res.status(500).json({ 
       success: false, 
       error: 'Erro interno no servidor ao tentar cadastrar a empresa.' 

@@ -14,43 +14,44 @@ datasource db {
 model Store {
   id                    String   @id @default(uuid())
   name                  String
-  slug                  String   @unique // Removi o default fixo, pois sendo @unique, daria erro ao criar a segunda loja
+  slug                  String   @unique
   
-  // 🏢 DADOS JURÍDICOS E CONTATO DA EMPRESA
-  corporateName         String?  // Razão Social
+  //DADOS JURÍDICOS E CONTATO DA EMPRESA
+  corporateName         String?
   documentCnpj          String?  @unique
-  stateRegistration     String?  // Inscrição Estadual
-  municipalRegistration String?  // Inscrição Municipal
-  email                 String?  @unique // E-mail da empresa (companyEmail no front)
-  phone                 String?  // Telefone da empresa (companyPhone no front)
-  address               String?  // Endereço completo
-  logoUrl               String?  // Logotipo da loja
+  stateRegistration     String?
+  municipalRegistration String?
+  email                 String?  @unique
+  phone                 String?
+  address               String?
+  logoUrl               String?
 
-  // 👤 DADOS DO RESPONSÁVEL / SÓCIO
+  //DADOS DO RESPONSÁVEL / SÓCIO
   ownerName             String?
   ownerCpf              String?
   ownerEmail            String?
   ownerPhone            String?
 
-  // 🧩 MÓDULOS CONTRATADOS (O que o lojista tem direito de usar)
+  //MÓDULOS CONTRATADOS
   activeDelivery        Boolean  @default(true)
   activeTotem           Boolean  @default(false)
   activeKds             Boolean  @default(false)
   activeFiscal          Boolean  @default(false)
 
-  // 💰 GESTÃO DE ASSINATURA (SaaS)
-  plan                  String   @default("STANDARD") // STANDARD, PRO, ENTERPRISE
+  //GESTÃO DE ASSINATURA E STATUS (SaaS)
+  plan                  String   @default("STANDARD")
   monthlyFee            Float    @default(0.00)
-  subscriptionStatus    String   @default("TRIAL") // TRIAL, ACTIVE, OVERDUE, BLOCKED
+  subscriptionStatus    String   @default("TRIAL")
   subscriptionDueDate   DateTime? 
+  status                String   @default("ACTIVE")
   
-  // 🔑 CHAVES DE INTEGRAÇÃO INDIVIDUAIS
-  mpPublicKey           String?  // Mercado Pago Front
-  mpAccessToken         String?  // Mercado Pago Back
-  focusEnv              String   @default("homologacao") // homologacao ou producao
-  focusToken            String?  // Token da Focus NFe da loja
+  //CHAVES DE INTEGRAÇÃO INDIVIDUAIS
+  mpPublicKey           String?
+  mpAccessToken         String?
+  focusEnv              String   @default("homologacao")
+  focusToken            String?
   
-  // ⚙️ CONFIGURAÇÕES DA LOJA
+  //CONFIGURAÇÕES DA LOJA
   deliveryFee           Float    @default(0.00)
   cashbackPercent       Float    @default(0.00)
   isManualFechado       Boolean  @default(false)
@@ -58,12 +59,12 @@ model Store {
   aboutUsText           String?
   promoBannerUrl        String?
   promoBannerLink       String?
-  schedule              Json?    // Agenda de funcionamento
+  schedule              Json?
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  // 🔗 RELACIONAMENTOS REVERSOS (Tudo o que pertence a esta loja)
+  //RELACIONAMENTOS REVERSOS
   users          User[]
   categories     Category[]
   products       Product[]
