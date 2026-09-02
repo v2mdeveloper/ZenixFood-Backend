@@ -3047,7 +3047,7 @@ app.post('/api/master/stores', async (req, res) => {
   try {
     const data = req.body;
 
-    // 1. Verifica se o slug (URL) já está em uso por outra loja
+    // 1. Verifica se o slug (URL) já está em uso
     const existingStore = await prisma.store.findUnique({
       where: { slug: data.slug }
     });
@@ -3058,11 +3058,10 @@ app.post('/api/master/stores', async (req, res) => {
         error: 'Já existe uma empresa cadastrada com esta URL (Slug). Tente outro.' 
       });
     }
-
-    // Função auxiliar para evitar erro de Unique Constraint com strings vazias ("")
+    
     const cleanEmpty = (value) => (value === undefined || value === null || value.trim() === '') ? null : value;
 
-    // 2. Cria a nova loja no banco de dados mapeando os campos do front-end
+    // 2. Cria a nova loja no banco
     const newStore = await prisma.store.create({
       data: {
         name: data.name,
@@ -3085,11 +3084,35 @@ app.post('/api/master/stores', async (req, res) => {
       }
     });
 
+    // 3. CRIA O 1º USUÁRIO (DONO DA LOJA) AUTOMATICAMENTE
+    // Define a senha padrão como "123456". Criptografe se o seu sistema exigir!
+    let senhaPadrao = '123456';
+    
+    // Descomente as duas linhas abaixo se o seu sistema usar senhas criptografadas (bcrypt):
+    // const salt = await bcrypt.genSalt(10);
+    // senhaPadrao = await bcrypt.hash('123456', salt);
+
+    // Identifica qual e-mail usar (Dono, ou da Empresa, ou um genérico admin@slug.com)
+    const loginEmail = cleanEmpty(data.ownerEmail) || cleanEmpty(data.companyEmail) || `admin@${data.slug}.com`;
+    const loginCpf = cleanEmpty(data.ownerCpf) || '00000000000';
+
+    await prisma.employee.create({
+      data: {
+        name: data.ownerName || `Administrador - ${data.name}`,
+        email: loginEmail,
+        cpf: loginCpf,
+        password: senhaPadrao,
+        role: 'ADMIN',          // Permissão total
+        isActive: true,
+        receivesTips: false,
+        storeId: newStore.id    // 👈 Vincula esse dono à nova loja!
+      }
+    });
+
     res.json({ success: true, store: newStore });
   } catch (error) {
     console.error('Erro ao cadastrar nova loja:', error);
-    
-    // Tratamento específico de erro do Prisma para campos duplicados
+  
     if (error.code === 'P2002') {
       return res.status(400).json({ 
         success: false, 
