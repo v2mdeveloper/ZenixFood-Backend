@@ -3039,9 +3039,60 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
   }
 });
 
-// ROTAS MASTER: EDIÇÃO E STATUS DA LOJA (SAAS)
 
-// 1. Atualizar todos os dados da empresa e assinatura
+// ROTA MASTER: CADASTRAR NOVA LOJA
+
+// 1. Cadastrar nova loja (SaaS)
+app.post('/api/master/stores', async (req, res) => {
+  try {
+    const data = req.body;
+
+    //Verifica se o slug (URL) já está em uso por outra loja
+    const existingStore = await prisma.store.findUnique({
+      where: { slug: data.slug }
+    });
+
+    if (existingStore) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Já existe uma empresa cadastrada com esta URL (Slug). Tente outro.' 
+      });
+    }
+
+    //Cria a nova loja no banco de dados mapeando os campos do front-end
+    const newStore = await prisma.store.create({
+      data: {
+        name: data.name,
+        slug: data.slug,
+        corporateName: data.corporateName,
+        documentCnpj: data.cnpj,                // Front envia 'cnpj', banco salva 'documentCnpj'
+        stateRegistration: data.stateRegistration,
+        municipalRegistration: data.municipalRegistration,
+        email: data.companyEmail,              // Front envia 'companyEmail', banco salva 'email'
+        phone: data.companyPhone,              // Front envia 'companyPhone', banco salva 'phone'
+        ownerName: data.ownerName,
+        ownerCpf: data.ownerCpf,
+        ownerEmail: data.ownerEmail,
+        ownerPhone: data.ownerPhone,
+        address: data.address,
+        logoUrl: data.logoUrl,
+        plan: data.plan || 'STANDARD',
+        status: 'ACTIVE',                      // Sistema já nasce liberado
+        subscriptionStatus: 'TRIAL'            // Nasce em período de teste
+      }
+    });
+
+    res.json({ success: true, store: newStore });
+  } catch (error) {
+    console.error('Erro ao cadastrar nova loja:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Erro interno no servidor ao tentar cadastrar a empresa.' 
+    });
+  }
+});
+
+//Atualizar todos os dados da empresa e assinatura
 app.put('/api/master/stores/:id', async (req, res) => {
   try {
     const { id } = req.params;
