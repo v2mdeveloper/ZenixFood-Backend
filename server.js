@@ -28,29 +28,6 @@ app.put("/api/master/stores/:id/modules", MasterAdminController.updateStoreModul
 const storeMiddleware = require("./middlewares/storeMiddleware");
 const tenantMiddleware = require("./middlewares/tenantMiddleware");
 
-// ROTA PARA BUSCAR LOJA PELO SLUG (SaaS)
-app.get("/api/stores/slug/:slug", async (req, res) => {
-  try {
-    const store = await prisma.store.findUnique({
-      where: { slug: req.params.slug },
-      select: { 
-        id: true, 
-        name: true, 
-        activeDelivery: true, 
-        activeTotem: true 
-      }
-    });
-
-    if (!store) {
-      return res.status(404).json({ error: "Loja não encontrada." });
-    }
-
-    res.json({ success: true, store });
-  } catch (error) {
-    res.status(500).json({ error: "Erro interno." });
-  }
-});
-
 app.use(storeMiddleware);
 
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
@@ -324,33 +301,6 @@ app.delete("/api/product-groups/:id", async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: "Erro" });
-  }
-});
-
-// CONFIGURAÇÕES, FISCAL, UPSELLS E CUPONS
-app.get("/api/settings", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  const isOpen = await checkStoreStatus(req.storeId);
-  const settings = await getSettings(req.storeId);
-  res.json({ ...settings, isOpen });
-});
-
-app.put("/api/settings", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  try {
-    const currentSettings = await getSettings(req.storeId);
-    const updatedSettings = { ...currentSettings, ...req.body };
-    const id = `settings_${req.storeId}`;
-    
-    const existing = await prisma.systemConfig.findFirst({ where: { id, storeId: req.storeId } });
-    if (existing) {
-      await prisma.systemConfig.updateMany({ where: { id, storeId: req.storeId }, data: { data: JSON.stringify(updatedSettings) } });
-    } else {
-      await prisma.systemConfig.create({ data: { id, storeId: req.storeId, data: JSON.stringify(updatedSettings) } });
-    }
-    res.json({ success: true, settings: updatedSettings });
-  } catch (error) {
-    res.status(500).json({ error: "Erro DB" });
   }
 });
 
@@ -3040,263 +2990,165 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
 });
 
 
-// ROTA MASTER: CADASTRAR NOVA LOJA
+// ============================================================================
+// ROTAS MASTER: GESTÃO GLOBAL DE LOJAS
+// ============================================================================
 
-// 1. Cadastrar nova loja (SaaS)
 app.post('/api/master/stores', async (req, res) => {
   try {
     const data = req.body;
-
-    // 1. Verifica se o slug (URL) já está em uso
-    const existingStore = await prisma.store.findUnique({
-      where: { slug: data.slug }
-    });
-
-    if (existingStore) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Já existe uma empresa cadastrada com esta URL (Slug). Tente outro.' 
-      });
-    }
+    const existingStore = await prisma.store.findUnique({ where: { slug: data.slug } });
+    if (existingStore) return res.status(400).json({ success: false, error: 'Já existe uma empresa com esta URL.' });
     
     const cleanEmpty = (value) => (value === undefined || value === null || value.trim() === '') ? null : value;
 
-    // 2. Cria a nova loja no banco
     const newStore = await prisma.store.create({
       data: {
-        name: data.name,
-        slug: data.slug,
-        corporateName: cleanEmpty(data.corporateName),
-        documentCnpj: cleanEmpty(data.cnpj),                
-        stateRegistration: cleanEmpty(data.stateRegistration),
-        municipalRegistration: cleanEmpty(data.municipalRegistration),
-        email: cleanEmpty(data.companyEmail),              
-        phone: cleanEmpty(data.companyPhone),              
-        ownerName: cleanEmpty(data.ownerName),
-        ownerCpf: cleanEmpty(data.ownerCpf),
-        ownerEmail: cleanEmpty(data.ownerEmail),
-        ownerPhone: cleanEmpty(data.ownerPhone),
-        address: cleanEmpty(data.address),
-        logoUrl: cleanEmpty(data.logoUrl),
-        plan: data.plan || 'STANDARD',
-        status: 'ACTIVE',                      
-        subscriptionStatus: 'TRIAL'            
+        name: data.name, slug: data.slug, corporateName: cleanEmpty(data.corporateName),
+        documentCnpj: cleanEmpty(data.cnpj), stateRegistration: cleanEmpty(data.stateRegistration),
+        municipalRegistration: cleanEmpty(data.municipalRegistration), email: cleanEmpty(data.companyEmail),              
+        phone: cleanEmpty(data.companyPhone), ownerName: cleanEmpty(data.ownerName),
+        ownerCpf: cleanEmpty(data.ownerCpf), ownerEmail: cleanEmpty(data.ownerEmail),
+        ownerPhone: cleanEmpty(data.ownerPhone), address: cleanEmpty(data.address),
+        logoUrl: cleanEmpty(data.logoUrl), plan: data.plan || 'STANDARD',
+        status: 'ACTIVE', subscriptionStatus: 'TRIAL'            
       }
     });
 
-    // 3. CRIA O 1º USUÁRIO (DONO DA LOJA) AUTOMATICAMENTE
-    // Define a senha padrão como "123456". Criptografe se o seu sistema exigir!
-    let senhaPadrao = '123456';
-    
-    // Descomente as duas linhas abaixo se o seu sistema usar senhas criptografadas (bcrypt):
-    // const salt = await bcrypt.genSalt(10);
-    // senhaPadrao = await bcrypt.hash('123456', salt);
-
-    // Identifica qual e-mail usar (Dono, ou da Empresa, ou um genérico admin@slug.com)
     const loginEmail = cleanEmpty(data.ownerEmail) || cleanEmpty(data.companyEmail) || `admin@${data.slug}.com`;
     const loginCpf = cleanEmpty(data.ownerCpf) || '00000000000';
 
     await prisma.employee.create({
       data: {
-        name: data.ownerName || `Administrador - ${data.name}`,
-        email: loginEmail,
-        cpf: loginCpf,
-        password: senhaPadrao,
-        role: 'ADMIN',          // Permissão total
-        isActive: true,
-        receivesTips: false,
-        storeId: newStore.id    // 👈 Vincula esse dono à nova loja!
+        name: data.ownerName || `Administrador - ${data.name}`, email: loginEmail, cpf: loginCpf,
+        password: '123456', role: 'ADMIN', isActive: true, receivesTips: false, storeId: newStore.id
       }
     });
-
     res.json({ success: true, store: newStore });
   } catch (error) {
-    console.error('Erro ao cadastrar nova loja:', error);
-  
-    if (error.code === 'P2002') {
-      return res.status(400).json({ 
-        success: false, 
-        error: `Os dados informados para o campo ${error.meta.target} já estão em uso por outra empresa.` 
-      });
-    }
-
-    res.status(500).json({ 
-      success: false, 
-      error: 'Erro interno no servidor ao tentar cadastrar a empresa.' 
-    });
+    if (error.code === 'P2002') return res.status(400).json({ success: false, error: `Os dados do campo ${error.meta.target} já estão em uso.` });
+    res.status(500).json({ success: false, error: 'Erro interno ao cadastrar loja.' });
   }
 });
 
-//Atualizar todos os dados da empresa e assinatura
 app.put('/api/master/stores/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
-
     const updatedStore = await prisma.store.update({
       where: { id },
       data: {
-        name: data.name,
-        slug: data.slug,
-        corporateName: data.corporateName,
-        documentCnpj: data.cnpj || data.documentCnpj, // Mapeia corretamente o CNPJ
-        stateRegistration: data.stateRegistration,
-        municipalRegistration: data.municipalRegistration,
-        email: data.companyEmail || data.email,
-        phone: data.companyPhone || data.phone,
-        address: data.address,
-        logoUrl: data.logoUrl,
-        ownerName: data.ownerName,
-        ownerCpf: data.ownerCpf,
-        ownerEmail: data.ownerEmail,
-        ownerPhone: data.ownerPhone,
-        plan: data.plan,
-        monthlyFee: parseFloat(data.monthlyFee) || 0,
+        name: data.name, slug: data.slug, corporateName: data.corporateName,
+        documentCnpj: data.cnpj || data.documentCnpj, stateRegistration: data.stateRegistration,
+        municipalRegistration: data.municipalRegistration, email: data.companyEmail || data.email,
+        phone: data.companyPhone || data.phone, address: data.address, logoUrl: data.logoUrl,
+        ownerName: data.ownerName, ownerCpf: data.ownerCpf, ownerEmail: data.ownerEmail,
+        ownerPhone: data.ownerPhone, plan: data.plan, monthlyFee: parseFloat(data.monthlyFee) || 0,
         subscriptionStatus: data.subscriptionStatus,
       }
     });
-
     res.json({ success: true, store: updatedStore });
   } catch (error) {
-    console.error('Erro ao atualizar loja:', error);
-    res.status(500).json({ success: false, error: 'Erro interno ao atualizar os dados da empresa.' });
+    res.status(500).json({ success: false, error: 'Erro ao atualizar loja.' });
   }
 });
 
-// 2. Alternar Status de Acesso do Sistema (ACTIVE / BLOCKED)
 app.put('/api/master/stores/:id/status', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-
     const updatedStore = await prisma.store.update({
-      where: { id },
-      data: { status }
+      where: { id: req.params.id }, data: { status: req.body.status }
     });
-
     res.json({ success: true, store: updatedStore });
   } catch (error) {
-    console.error('Erro ao atualizar status da loja:', error);
-    res.status(500).json({ success: false, error: 'Erro interno ao bloquear/desbloquear a loja.' });
+    res.status(500).json({ success: false, error: 'Erro ao bloquear loja.' });
   }
 });
 
-// ROTAS DE CONFIGURAÇÕES DA LOJA (SETTINGS)
+// ROTAS DE CONFIGURAÇÕES DA LOJA (SETTINGS) E VISUAL
 
-// 1. Rota para BUSCAR as configurações atuais (GET)
-app.get('/api/settings', async (req, res) => {
+app.get("/api/settings", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
   try {
-    const storeId = req.headers['x-store-id'];
-    if (!storeId) {
-      return res.status(400).json({ success: false, error: 'Store ID não fornecido no cabeçalho.' });
-    }
-
+    const isOpen = await checkStoreStatus(req.storeId);
+    const settings = await getSettings(req.storeId);
+    
+    // Busca as imagens e links direto da tabela Store
     const store = await prisma.store.findUnique({
-      where: { id: storeId }
+      where: { id: req.storeId },
+      select: { logoUrl: true, coverImageUrl: true, totemCoverImageUrl: true, ifoodLink: true, ninetyNineFoodLink: true }
     });
 
-    if (!store) {
-      return res.status(404).json({ success: false, error: 'Loja não encontrada.' });
-    }
-
-    res.json(store);
+    res.json({ ...settings, ...store, isOpen });
   } catch (error) {
-    console.error('Erro ao buscar configurações:', error);
-    res.status(500).json({ success: false, error: 'Erro interno ao buscar as configurações da loja.' });
+    res.status(500).json({ error: "Erro ao buscar settings" });
   }
 });
 
-// 2. Rota para ATUALIZAR as configurações e personalização visual (PUT)
-app.put('/api/settings', async (req, res) => {
+app.put("/api/settings", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
   try {
-    const storeId = req.headers['x-store-id'];
-    if (!storeId) {
-      return res.status(400).json({ success: false, error: 'Store ID não fornecido no cabeçalho.' });
+    const data = req.body;
+    const currentSettings = await getSettings(req.storeId);
+    const updatedSettings = { ...currentSettings, ...data };
+    const id = `settings_${req.storeId}`;
+    
+    const existing = await prisma.systemConfig.findFirst({ where: { id, storeId: req.storeId } });
+    if (existing) {
+      await prisma.systemConfig.updateMany({ where: { id, storeId: req.storeId }, data: { data: JSON.stringify(updatedSettings) } });
+    } else {
+      await prisma.systemConfig.create({ data: { id, storeId: req.storeId, data: JSON.stringify(updatedSettings) } });
     }
 
-    const data = req.body;
-
-    const updatedStore = await prisma.store.update({
-      where: { id: storeId },
+    // Salva as imagens e links na tabela Store para as Rotas Públicas lerem
+    await prisma.store.update({
+      where: { id: req.storeId },
       data: {
-        isManualFechado: data.isManualFechado,
-        deliveryFee: parseFloat(data.deliveryFee) || 0,
-        cashbackPercent: parseFloat(data.cashbackPercent) || 0,
-        promoBannerUrl: data.promoBannerUrl,
-        promoBannerLink: data.promoBannerLink,
-        youtubeLiveId: data.youtubeLiveId,
-        printerName: data.printerName,
-        aboutUsText: data.aboutUsText,
-        storeCnpj: data.storeCnpj,
-        schedule: data.schedule ? data.schedule : undefined,
-        logoUrl: data.logoUrl,
-        coverImageUrl: data.coverImageUrl,
-        totemCoverImageUrl: data.totemCoverImageUrl,
-        ifoodLink: data.ifoodLink,
-        ninetyNineFoodLink: data.ninetyNineFoodLink,
+        logoUrl: data.logoUrl || null, 
+        coverImageUrl: data.coverImageUrl || null,
+        totemCoverImageUrl: data.totemCoverImageUrl || null, 
+        ifoodLink: data.ifoodLink || null,
+        ninetyNineFoodLink: data.ninetyNineFoodLink || null,
       }
     });
 
-    res.json({ success: true, store: updatedStore });
+    res.json({ success: true, settings: updatedSettings });
   } catch (error) {
-    console.error('Erro ao salvar configurações:', error);
-    res.status(500).json({ success: false, error: 'Erro interno ao salvar as configurações da loja.' });
+    res.status(500).json({ error: "Erro ao salvar config no banco." });
   }
 });
 
 // ROTAS PÚBLICAS (CARDÁPIO DIGITAL E TOTEM) - SEM NECESSIDADE DE LOGIN
 
-// 1. Buscar os Dados e Configurações da Loja pelo Slug (URL)
 app.get('/api/stores/slug/:slug', async (req, res) => {
   try {
-    const { slug } = req.params;
-    const store = await prisma.store.findUnique({
-      where: { slug: slug }
-    });
-
-    if (!store) {
-      return res.status(404).json({ success: false, error: 'Loja não encontrada' });
-    }
-
-    // Retorna a loja (com os novos campos de coverImageUrl, logoUrl, totemCoverImageUrl, etc)
+    const store = await prisma.store.findUnique({ where: { slug: req.params.slug } });
+    if (!store) return res.status(404).json({ success: false, error: 'Loja não encontrada' });
+    
     res.json({ success: true, store });
   } catch (error) {
-    console.error("Erro ao buscar loja por slug:", error);
-    res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+    res.status(500).json({ success: false, error: 'Erro interno ao buscar loja.' });
   }
 });
 
-// 2. Buscar o Cardápio Público pelo Slug (Traz Categorias e Produtos Ativos)
 app.get('/api/menu/public/:slug', async (req, res) => {
   try {
-    const { slug } = req.params;
+    const store = await prisma.store.findUnique({ where: { slug: req.params.slug } });
+    if (!store) return res.status(404).json({ success: false, error: 'Loja não encontrada' });
 
-    // Acha a loja para pegar o ID dela
-    const store = await prisma.store.findUnique({
-      where: { slug: slug }
-    });
-
-    if (!store) {
-      return res.status(404).json({ success: false, error: 'Loja não encontrada' });
-    }
-
-    // Busca as categorias ordenadas, incluindo apenas os produtos ATIVOS
     const menu = await prisma.category.findMany({
       where: { storeId: store.id },
       orderBy: { order: 'asc' },
       include: {
         products: {
-          where: { isActive: true }, // Só exibe produtos ativos para o cliente!
+          where: { isActive: true }, 
           orderBy: { order: 'asc' }
         }
       }
     });
-
-    // O Frontend espera receber um array direto com as categorias
+    
     res.json(menu);
   } catch (error) {
-    console.error("Erro ao buscar menu público:", error);
-    res.status(500).json({ success: false, error: 'Erro interno' });
+    res.status(500).json({ success: false, error: 'Erro interno ao carregar o cardápio.' });
   }
 });
 
