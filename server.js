@@ -380,125 +380,187 @@ app.delete("/api/product-groups/:id", async (req, res) => {
   }
 });
 
+// ==========================================================
+// CONFIGURAÇÕES FISCAIS
+// ==========================================================
+
 app.get("/api/fiscal", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  res.json(await getFiscalData(req.storeId));
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  try {
+    res.json(await getFiscalData(req.storeId));
+  } catch (e) {
+    console.error("ERRO GET FISCAL:", e);
+    res.status(500).json({ error: "Erro ao buscar dados fiscais." });
+  }
 });
 
 app.put("/api/fiscal", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     const currentFiscal = await getFiscalData(req.storeId);
     const updatedFiscal = { ...currentFiscal, ...req.body };
     const id = `fiscal_${req.storeId}`;
     
+    const stringifiedData = JSON.stringify(updatedFiscal);
+    
     const existing = await prisma.systemConfig.findFirst({ where: { id, storeId: req.storeId } });
     if (existing) {
-      await prisma.systemConfig.updateMany({ where: { id, storeId: req.storeId }, data: { data: JSON.stringify(updatedFiscal) } });
+      await prisma.systemConfig.updateMany({ where: { id, storeId: req.storeId }, data: { data: stringifiedData } });
     } else {
-      await prisma.systemConfig.create({ data: { id, storeId: req.storeId, data: JSON.stringify(updatedFiscal) } });
+      await prisma.systemConfig.create({ data: { id, storeId: req.storeId, data: stringifiedData } });
     }
+    
     res.json({ success: true, fiscalData: updatedFiscal });
   } catch (error) {
-    res.status(500).json({ error: "Erro DB" });
+    console.error("ERRO PUT FISCAL:", error);
+    res.status(500).json({ error: error.message || "Erro ao salvar configurações fiscais." });
   }
 });
 
+// ==========================================================
+// UPSELLS (VENDAS ADICIONAIS)
+// ==========================================================
+
 app.get("/api/upsells", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  const upsells = await getSystemConfigArray("upsells", req.storeId);
-  res.json(upsells.filter((u) => u.active));
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  try {
+    const upsells = await getSystemConfigArray("upsells", req.storeId);
+    res.json(upsells.filter((u) => u.active));
+  } catch (e) {
+    console.error("ERRO GET UPSELLS:", e);
+    res.status(500).json({ error: "Erro ao buscar upsells ativos." });
+  }
 });
 
 app.get("/api/admin/upsells", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  res.json(await getSystemConfigArray("upsells", req.storeId));
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  try {
+    res.json(await getSystemConfigArray("upsells", req.storeId));
+  } catch (e) {
+    console.error("ERRO GET ADMIN UPSELLS:", e);
+    res.status(500).json({ error: "Erro ao buscar upsells no painel." });
+  }
 });
 
 app.post("/api/admin/upsells", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let upsells = await getSystemConfigArray("upsells", req.storeId);
     const newUpsell = { id: Date.now().toString(), ...req.body, active: true };
     upsells.push(newUpsell);
+    
     await saveSystemConfigArray("upsells", req.storeId, upsells);
-    res.json({ success: true, upsell: newUpsell });
+    res.status(201).json({ success: true, upsell: newUpsell });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST UPSELLS:", e);
+    res.status(500).json({ error: e.message || "Erro ao criar upsell." });
   }
 });
 
 app.put("/api/admin/upsells/:id", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let upsells = await getSystemConfigArray("upsells", req.storeId);
     const idx = upsells.findIndex((u) => u.id === req.params.id);
+    
     if (idx > -1) {
       upsells[idx] = { ...upsells[idx], ...req.body };
       await saveSystemConfigArray("upsells", req.storeId, upsells);
       res.json({ success: true, upsell: upsells[idx] });
-    } else res.status(404).json({ error: "Erro" });
+    } else {
+      res.status(404).json({ error: "Upsell não encontrado." });
+    }
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT UPSELLS:", e);
+    res.status(500).json({ error: e.message || "Erro ao atualizar upsell." });
   }
 });
 
 app.delete("/api/admin/upsells/:id", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let upsells = await getSystemConfigArray("upsells", req.storeId);
+    const initialLength = upsells.length;
+    
     upsells = upsells.filter((u) => u.id !== req.params.id);
+    
+    if (upsells.length === initialLength) {
+      return res.status(404).json({ error: "Upsell não encontrado." });
+    }
+    
     await saveSystemConfigArray("upsells", req.storeId, upsells);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE UPSELLS:", e);
+    res.status(500).json({ error: e.message || "Erro ao deletar upsell." });
   }
 });
 
+// ==========================================================
+// FORNECEDORES (SUPPLIERS)
+// ==========================================================
+
 app.get("/api/suppliers", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
-  res.json(await getSystemConfigArray("suppliers", req.storeId));
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  try {
+    res.json(await getSystemConfigArray("suppliers", req.storeId));
+  } catch (e) {
+    console.error("ERRO GET SUPPLIERS:", e);
+    res.status(500).json({ error: "Erro ao buscar fornecedores." });
+  }
 });
 
 app.post("/api/admin/suppliers", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let suppliers = await getSystemConfigArray("suppliers", req.storeId);
     const newSupplier = { id: Date.now().toString(), ...req.body, active: true };
     suppliers.push(newSupplier);
+    
     await saveSystemConfigArray("suppliers", req.storeId, suppliers);
-    res.json({ success: true, supplier: newSupplier });
+    res.status(201).json({ success: true, supplier: newSupplier });
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST SUPPLIERS:", error);
+    res.status(500).json({ error: error.message || "Erro ao criar fornecedor." });
   }
 });
 
 app.put("/api/admin/suppliers/:id", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let suppliers = await getSystemConfigArray("suppliers", req.storeId);
     const idx = suppliers.findIndex((s) => s.id === req.params.id);
+    
     if (idx > -1) {
       suppliers[idx] = { ...suppliers[idx], ...req.body };
       await saveSystemConfigArray("suppliers", req.storeId, suppliers);
       res.json({ success: true, supplier: suppliers[idx] });
     } else {
-      res.status(404).json({ error: "Erro" });
+      res.status(404).json({ error: "Fornecedor não encontrado." });
     }
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT SUPPLIERS:", error);
+    res.status(500).json({ error: error.message || "Erro ao atualizar fornecedor." });
   }
 });
 
 app.delete("/api/admin/suppliers/:id", async (req, res) => {
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     let suppliers = await getSystemConfigArray("suppliers", req.storeId);
+    const initialLength = suppliers.length;
+    
     suppliers = suppliers.filter((s) => s.id !== req.params.id);
+    
+    if (suppliers.length === initialLength) {
+      return res.status(404).json({ error: "Fornecedor não encontrado." });
+    }
+    
     await saveSystemConfigArray("suppliers", req.storeId, suppliers);
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE SUPPLIERS:", error);
+    res.status(500).json({ error: error.message || "Erro ao deletar fornecedor." });
   }
 });
 
@@ -892,122 +954,182 @@ app.post("/api/avaliacoes", async (req, res) => {
 });
 
 // RH - PERFIS E FUNCIONÁRIOS (SaaS)
+// ==========================================
+// RH - PERFIS E FUNCIONÁRIOS
+// ==========================================
+
 app.get("/api/rh/profiles", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(await prisma.accessProfile.findMany({ 
-      where: { storeId: req.storeId }, // 🚨 SAAS FILTER
+      where: { storeId: req.storeId },
       orderBy: { name: "asc" } 
     }));
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET RH PROFILES:", e);
+    res.status(500).json({ error: "Erro ao buscar perfis." });
   }
 });
+
 app.post("/api/rh/profiles", async (req, res) => {
-  const { name, permissions } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    const { name, permissions } = req.body;
+    if (!name) return res.status(400).json({ error: "O nome do perfil é obrigatório." });
+
     const existing = await prisma.accessProfile.findFirst({ where: { name, storeId: req.storeId } });
-    if (existing) return res.status(400).json({ error: "Já existe." });
-    res.status(201).json({
-        success: true,
-        profile: await prisma.accessProfile.create({
-          data: { storeId: req.storeId, name, permissions: JSON.stringify(permissions || []) },
-        }),
-      });
-  } catch (e) {
-    res.status(500).json({ error: "Erro" });
-  }
-});
-app.put("/api/rh/profiles/:id", async (req, res) => {
-  const { name, permissions } = req.body;
-  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
-  try {
-    const existing = await prisma.accessProfile.findFirst({ where: { name, storeId: req.storeId } });
-    if (existing && existing.id !== req.params.id) return res.status(400).json({ error: "Já existe." });
-    res.json({
-      success: true,
-      profile: await prisma.accessProfile.update({
-        where: { id: req.params.id },
-        data: { name, permissions: JSON.stringify(permissions || []) },
-      }),
+    if (existing) return res.status(400).json({ error: "Já existe um perfil com este nome." });
+
+    const profile = await prisma.accessProfile.create({
+      data: { storeId: req.storeId, name, permissions: JSON.stringify(permissions || []) },
     });
+    res.status(201).json({ success: true, profile });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST RH PROFILES:", e);
+    res.status(500).json({ error: e.message || "Erro ao criar perfil." });
   }
 });
-app.delete("/api/rh/profiles/:id", async (req, res) => {
+
+app.put("/api/rh/profiles/:id", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    const { name, permissions } = req.body;
+    if (!name) return res.status(400).json({ error: "O nome do perfil é obrigatório." });
+
+    const existing = await prisma.accessProfile.findFirst({ where: { name, storeId: req.storeId } });
+    if (existing && existing.id !== req.params.id) return res.status(400).json({ error: "Já existe um perfil com este nome." });
+
+    const profile = await prisma.accessProfile.update({
+      where: { id: req.params.id },
+      data: { name, permissions: JSON.stringify(permissions || []) },
+    });
+    res.json({ success: true, profile });
+  } catch (e) {
+    console.error("ERRO PUT RH PROFILES:", e);
+    res.status(500).json({ error: e.message || "Erro ao atualizar perfil." });
+  }
+});
+
+app.delete("/api/rh/profiles/:id", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  try {
+    // Validação de segurança SaaS
+    const existing = await prisma.accessProfile.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
+    if (!existing) return res.status(404).json({ error: "Perfil não encontrado ou não pertence a esta loja." });
+
     const checkEmployees = await prisma.employee.count({ where: { profileId: req.params.id } });
-    if (checkEmployees > 0) return res.status(400).json({ error: "Tem funcionários vinculados." });
+    if (checkEmployees > 0) return res.status(400).json({ error: "Não é possível excluir. Existem funcionários vinculados a este perfil." });
+
     await prisma.accessProfile.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE RH PROFILES:", e);
+    res.status(500).json({ error: e.message || "Erro ao excluir perfil." });
   }
 });
 
 app.get("/api/rh/employees", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    res.json(
-      await prisma.employee.findMany({
-        where: { storeId: req.storeId }, // 🚨 SAAS FILTER
-        include: { profile: true },
-        orderBy: { name: "asc" },
-      })
-    );
+    res.json(await prisma.employee.findMany({
+      where: { storeId: req.storeId },
+      include: { profile: true },
+      orderBy: { name: "asc" },
+    }));
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET RH EMPLOYEES:", e);
+    res.status(500).json({ error: "Erro ao buscar funcionários." });
   }
 });
+
 app.post("/api/rh/employees", async (req, res) => {
-  const { name, cpf, age, address, email, phone, password, profileId, receivesTips, creditLimit, discountPercent } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    const { name, cpf, age, address, email, phone, password, profileId, receivesTips, creditLimit, discountPercent } = req.body;
+    
+    if (!name || !email || !password || !profileId) {
+      return res.status(400).json({ error: "Nome, e-mail, senha e perfil são obrigatórios." });
+    }
+
     const checkEmail = await prisma.employee.findFirst({ where: { email, storeId: req.storeId } });
-    if (checkEmail) return res.status(400).json({ error: "E-mail em uso." });
-    const checkCpf = await prisma.employee.findFirst({ where: { cpf, storeId: req.storeId } });
-    if (checkCpf) return res.status(400).json({ error: "CPF em uso." });
+    if (checkEmail) return res.status(400).json({ error: "Este e-mail já está em uso nesta loja." });
+    
+    if (cpf) {
+      const checkCpf = await prisma.employee.findFirst({ where: { cpf, storeId: req.storeId } });
+      if (checkCpf) return res.status(400).json({ error: "Este CPF já está cadastrado nesta loja." });
+    }
+
     const profileInfo = await prisma.accessProfile.findUnique({ where: { id: profileId } });
-    if (!profileInfo) return res.status(400).json({ error: "Perfil inválido." });
+    if (!profileInfo || profileInfo.storeId !== req.storeId) return res.status(400).json({ error: "Perfil inválido ou não pertence a esta loja." });
     
     const hashedPassword = await bcrypt.hash(password, 10);
     const newEmployee = await prisma.employee.create({
       data: {
-        storeId: req.storeId, // 🚨 AMARRA À LOJA
-        name, cpf, age: String(age), address, email, phone, password: hashedPassword,
-        role: profileInfo.name, profileId, isActive: true, receivesTips: Boolean(receivesTips),
-        creditLimit: Number(creditLimit), discountPercent: Number(discountPercent),
+        storeId: req.storeId,
+        name, 
+        cpf: cpf || null, 
+        age: String(age || ""), 
+        address: address || null, 
+        email, 
+        phone: phone || null, 
+        password: hashedPassword,
+        role: profileInfo.name, 
+        profileId, 
+        isActive: true, 
+        receivesTips: Boolean(receivesTips),
+        creditLimit: Number(creditLimit || 0), 
+        discountPercent: Number(discountPercent || 0),
       },
       include: { profile: true },
     });
     res.status(201).json({ success: true, employee: newEmployee });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST RH EMPLOYEES:", e);
+    res.status(500).json({ error: e.message || "Erro ao cadastrar funcionário." });
   }
 });
+
 app.put("/api/rh/employees/:id", async (req, res) => {
-  const { name, cpf, age, address, email, phone, password, profileId, isActive, receivesTips, creditLimit, discountPercent } = req.body;
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    const profileInfo = await prisma.accessProfile.findUnique({ where: { id: profileId } });
-    const updateData = {
-      name, cpf, age: String(age), address, email, phone, isActive, profileId,
-      role: profileInfo.name, receivesTips: Boolean(receivesTips),
-      creditLimit: Number(creditLimit), discountPercent: Number(discountPercent),
-    };
-    if (password && password.trim() !== "") updateData.password = await bcrypt.hash(password, 10);
+    const { name, cpf, age, address, email, phone, password, profileId, isActive, receivesTips, creditLimit, discountPercent } = req.body;
     
-    res.json({
-      success: true,
-      employee: await prisma.employee.update({
-        where: { id: req.params.id },
-        data: updateData,
-        include: { profile: true },
-      }),
+    // Validação de segurança SaaS
+    const existingEmployee = await prisma.employee.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
+    if (!existingEmployee) return res.status(404).json({ error: "Funcionário não encontrado ou não pertence a esta loja." });
+
+    const profileInfo = await prisma.accessProfile.findUnique({ where: { id: profileId } });
+    if (!profileInfo || profileInfo.storeId !== req.storeId) return res.status(400).json({ error: "Perfil inválido." });
+
+    const updateData = {
+      name, 
+      cpf: cpf || null, 
+      age: String(age || ""), 
+      address: address || null, 
+      email, 
+      phone: phone || null, 
+      isActive: Boolean(isActive), 
+      profileId,
+      role: profileInfo.name, 
+      receivesTips: Boolean(receivesTips),
+      creditLimit: Number(creditLimit || 0), 
+      discountPercent: Number(discountPercent || 0),
+    };
+    
+    if (password && password.trim() !== "") {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+    
+    const updatedEmployee = await prisma.employee.update({
+      where: { id: req.params.id },
+      data: updateData,
+      include: { profile: true },
     });
+    
+    res.json({ success: true, employee: updatedEmployee });
   } catch (e) {
-    res.status(500).json({ error: "Erro ao atualizar funcionário" });
+    console.error("ERRO PUT RH EMPLOYEES:", e);
+    res.status(500).json({ error: e.message || "Erro ao atualizar funcionário." });
   }
 });
 
