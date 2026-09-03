@@ -3181,6 +3181,68 @@ app.put('/api/master/stores/:id/status', async (req, res) => {
   }
 });
 
+// ROTAS DE CONFIGURAÇÕES DA LOJA (SETTINGS)
+
+// 1. Rota para BUSCAR as configurações atuais (GET)
+app.get('/api/settings', async (req, res) => {
+  try {
+    const storeId = req.headers['x-store-id'];
+    if (!storeId) {
+      return res.status(400).json({ success: false, error: 'Store ID não fornecido no cabeçalho.' });
+    }
+
+    const store = await prisma.store.findUnique({
+      where: { id: storeId }
+    });
+
+    if (!store) {
+      return res.status(404).json({ success: false, error: 'Loja não encontrada.' });
+    }
+
+    res.json(store);
+  } catch (error) {
+    console.error('Erro ao buscar configurações:', error);
+    res.status(500).json({ success: false, error: 'Erro interno ao buscar as configurações da loja.' });
+  }
+});
+
+// 2. Rota para ATUALIZAR as configurações e personalização visual (PUT)
+app.put('/api/settings', async (req, res) => {
+  try {
+    const storeId = req.headers['x-store-id'];
+    if (!storeId) {
+      return res.status(400).json({ success: false, error: 'Store ID não fornecido no cabeçalho.' });
+    }
+
+    const data = req.body;
+
+    const updatedStore = await prisma.store.update({
+      where: { id: storeId },
+      data: {
+        isManualFechado: data.isManualFechado,
+        deliveryFee: parseFloat(data.deliveryFee) || 0,
+        cashbackPercent: parseFloat(data.cashbackPercent) || 0,
+        promoBannerUrl: data.promoBannerUrl,
+        promoBannerLink: data.promoBannerLink,
+        youtubeLiveId: data.youtubeLiveId,
+        printerName: data.printerName,
+        aboutUsText: data.aboutUsText,
+        storeCnpj: data.storeCnpj,
+        schedule: data.schedule ? data.schedule : undefined,
+        logoUrl: data.logoUrl,
+        coverImageUrl: data.coverImageUrl,
+        ifoodLink: data.ifoodLink,
+        ninetyNineFoodLink: data.ninetyNineFoodLink,
+      }
+    });
+
+    res.json({ success: true, store: updatedStore });
+  } catch (error) {
+    console.error('Erro ao salvar configurações:', error);
+    res.status(500).json({ success: false, error: 'Erro interno ao salvar as configurações da loja.' });
+  }
+});
+
 // START SERVER
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => console.log(`🚀 Servidor ZenixFood SaaS rodando na porta ${PORT}`));
