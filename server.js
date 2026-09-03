@@ -3231,6 +3231,7 @@ app.put('/api/settings', async (req, res) => {
         schedule: data.schedule ? data.schedule : undefined,
         logoUrl: data.logoUrl,
         coverImageUrl: data.coverImageUrl,
+        totemCoverImageUrl: data.totemCoverImageUrl,
         ifoodLink: data.ifoodLink,
         ninetyNineFoodLink: data.ninetyNineFoodLink,
       }

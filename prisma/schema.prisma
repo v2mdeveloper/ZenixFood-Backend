@@ -60,6 +60,10 @@ model Store {
   promoBannerUrl        String?
   promoBannerLink       String?
   schedule              Json?
+  coverImageUrl       String?
+  totemCoverImageUrl  String?
+  ifoodLink           String?  
+  ninetyNineFoodLink  String? 
 
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
