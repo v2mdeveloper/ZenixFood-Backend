@@ -3244,6 +3244,62 @@ app.put('/api/settings', async (req, res) => {
   }
 });
 
+// ROTAS PÚBLICAS (CARDÁPIO DIGITAL E TOTEM) - SEM NECESSIDADE DE LOGIN
+
+// 1. Buscar os Dados e Configurações da Loja pelo Slug (URL)
+app.get('/api/stores/slug/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const store = await prisma.store.findUnique({
+      where: { slug: slug }
+    });
+
+    if (!store) {
+      return res.status(404).json({ success: false, error: 'Loja não encontrada' });
+    }
+
+    // Retorna a loja (com os novos campos de coverImageUrl, logoUrl, totemCoverImageUrl, etc)
+    res.json({ success: true, store });
+  } catch (error) {
+    console.error("Erro ao buscar loja por slug:", error);
+    res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+  }
+});
+
+// 2. Buscar o Cardápio Público pelo Slug (Traz Categorias e Produtos Ativos)
+app.get('/api/menu/public/:slug', async (req, res) => {
+  try {
+    const { slug } = req.params;
+
+    // Acha a loja para pegar o ID dela
+    const store = await prisma.store.findUnique({
+      where: { slug: slug }
+    });
+
+    if (!store) {
+      return res.status(404).json({ success: false, error: 'Loja não encontrada' });
+    }
+
+    // Busca as categorias ordenadas, incluindo apenas os produtos ATIVOS
+    const menu = await prisma.category.findMany({
+      where: { storeId: store.id },
+      orderBy: { order: 'asc' },
+      include: {
+        products: {
+          where: { isActive: true }, // Só exibe produtos ativos para o cliente!
+          orderBy: { order: 'asc' }
+        }
+      }
+    });
+
+    // O Frontend espera receber um array direto com as categorias
+    res.json(menu);
+  } catch (error) {
+    console.error("Erro ao buscar menu público:", error);
+    res.status(500).json({ success: false, error: 'Erro interno' });
+  }
+});
+
 // START SERVER
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => console.log(`🚀 Servidor ZenixFood SaaS rodando na porta ${PORT}`));
