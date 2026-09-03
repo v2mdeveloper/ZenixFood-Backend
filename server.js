@@ -225,82 +225,158 @@ async function checkEmployeeAccountRules(employeeId, purchaseAmount, managerAuth
 app.get("/api/printers", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    res.json(await prisma.printer.findMany({ where: { storeId: req.storeId } })); // 🚨 Filter
+    res.json(await prisma.printer.findMany({ where: { storeId: req.storeId } }));
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET PRINTERS:", e);
+    res.status(500).json({ error: "Erro ao buscar impressoras" });
   }
 });
+
 app.post("/api/printers", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    res.status(201).json({
-        success: true,
-        printer: await prisma.printer.create({ data: { storeId: req.storeId, ...req.body } }), // 🚨 Inject
-      });
+    const { name, type, address } = req.body;
+    
+    // Validação de campos obrigatórios
+    if (!name || !address) {
+      return res.status(400).json({ error: "Nome e IP/Endereço são obrigatórios." });
+    }
+
+    const printer = await prisma.printer.create({
+      data: {
+        storeId: req.storeId,
+        name: name,
+        type: type || 'USB',
+        address: address
+      }
+    });
+
+    res.status(201).json({ success: true, printer });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST PRINTERS:", e);
+    res.status(500).json({ error: e.message || "Erro ao criar impressora." });
   }
 });
+
 app.put("/api/printers/:id", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    const { name, type, address } = req.body;
+    
     const existing = await prisma.printer.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
     if (!existing) return res.status(404).json({ error: "Impressora não encontrada ou não pertence a esta loja." });
-    res.json({ success: true, printer: await prisma.printer.update({ where: { id: req.params.id }, data: req.body }) });
+    
+    const updatedPrinter = await prisma.printer.update({
+      where: { id: req.params.id },
+      data: { 
+        name: name, 
+        type: type, 
+        address: address 
+      }
+    });
+    
+    res.json({ success: true, printer: updatedPrinter });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT PRINTERS:", e);
+    res.status(500).json({ error: e.message || "Erro ao atualizar impressora." });
   }
 });
+
 app.delete("/api/printers/:id", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     const existing = await prisma.printer.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
     if (!existing) return res.status(404).json({ error: "Não autorizada." });
+    
     await prisma.printer.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE PRINTERS:", e);
+    res.status(500).json({ error: e.message || "Erro ao deletar impressora." });
   }
 });
 
 app.get("/api/product-groups", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    res.json(await prisma.productGroup.findMany({ where: { storeId: req.storeId }, include: { printer: true } }));
+    res.json(
+      await prisma.productGroup.findMany({ 
+        where: { storeId: req.storeId }, 
+        include: { printer: true } 
+      })
+    );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET PRODUCT GROUPS:", e);
+    res.status(500).json({ error: "Erro ao buscar grupos de produtos." });
   }
 });
+
 app.post("/api/product-groups", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    res.status(201).json({
-        success: true,
-        group: await prisma.productGroup.create({ data: { storeId: req.storeId, ...req.body } }),
-      });
+    const { name, printerId, regraFiscalId } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: "O nome do grupo é obrigatório." });
+    }
+
+    const group = await prisma.productGroup.create({ 
+      data: { 
+        storeId: req.storeId, 
+        name: name,
+        printerId: printerId || null,
+        regraFiscalId: regraFiscalId || null
+      } 
+    });
+
+    res.status(201).json({ success: true, group });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST PRODUCT GROUPS:", e);
+    res.status(500).json({ error: e.message || "Erro ao criar grupo de produtos." });
   }
 });
+
 app.put("/api/product-groups/:id", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    const existing = await prisma.productGroup.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
+    const { name, printerId, regraFiscalId } = req.body;
+
+    const existing = await prisma.productGroup.findFirst({ 
+      where: { id: req.params.id, storeId: req.storeId } 
+    });
+    
     if (!existing) return res.status(404).json({ error: "Não autorizado." });
-    res.json({ success: true, group: await prisma.productGroup.update({ where: { id: req.params.id }, data: req.body }) });
+    
+    const updatedGroup = await prisma.productGroup.update({ 
+      where: { id: req.params.id }, 
+      data: {
+        name: name,
+        printerId: printerId || null,
+        regraFiscalId: regraFiscalId || null
+      } 
+    });
+
+    res.json({ success: true, group: updatedGroup });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT PRODUCT GROUPS:", e);
+    res.status(500).json({ error: e.message || "Erro ao atualizar grupo de produtos." });
   }
 });
+
 app.delete("/api/product-groups/:id", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    const existing = await prisma.productGroup.findFirst({ where: { id: req.params.id, storeId: req.storeId } });
+    const existing = await prisma.productGroup.findFirst({ 
+      where: { id: req.params.id, storeId: req.storeId } 
+    });
+    
     if (!existing) return res.status(404).json({ error: "Não autorizado." });
+    
     await prisma.productGroup.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE PRODUCT GROUPS:", e);
+    res.status(500).json({ error: e.message || "Erro ao deletar grupo de produtos." });
   }
 });
 
