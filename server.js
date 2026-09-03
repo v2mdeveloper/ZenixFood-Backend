@@ -397,6 +397,12 @@ app.get("/api/fiscal", async (req, res) => {
 app.put("/api/fiscal", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    // 🛡️ TRAVA DE SEGURANÇA: Garante que a loja existe antes de salvar para evitar o erro de chave estrangeira
+    const storeExists = await prisma.store.findUnique({ where: { id: req.storeId } });
+    if (!storeExists) {
+      return res.status(400).json({ error: "A loja informada não existe mais no banco de dados. Faça login novamente." });
+    }
+
     const currentFiscal = await getFiscalData(req.storeId);
     const updatedFiscal = { ...currentFiscal, ...req.body };
     const id = `fiscal_${req.storeId}`;
@@ -407,7 +413,13 @@ app.put("/api/fiscal", async (req, res) => {
     if (existing) {
       await prisma.systemConfig.updateMany({ where: { id, storeId: req.storeId }, data: { data: stringifiedData } });
     } else {
-      await prisma.systemConfig.create({ data: { id, storeId: req.storeId, data: stringifiedData } });
+      await prisma.systemConfig.create({ 
+        data: { 
+          id: id, 
+          storeId: req.storeId, // Vincula corretamente à loja existente
+          data: stringifiedData 
+        } 
+      });
     }
     
     res.json({ success: true, fiscalData: updatedFiscal });
@@ -954,9 +966,6 @@ app.post("/api/avaliacoes", async (req, res) => {
 });
 
 // RH - PERFIS E FUNCIONÁRIOS (SaaS)
-// ==========================================
-// RH - PERFIS E FUNCIONÁRIOS
-// ==========================================
 
 app.get("/api/rh/profiles", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
