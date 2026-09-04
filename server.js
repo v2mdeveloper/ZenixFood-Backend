@@ -620,24 +620,54 @@ app.get('/api/admin/store-info', async (req, res) => {
 app.put("/api/auth/admin/profile", async (req, res) => {
   const { name, email, password } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  
   try {
-    let adminUser = await prisma.user.findFirst({ where: { role: "ADMIN", storeId: req.storeId } });
-    if (!adminUser) {
-      const hashed = await bcrypt.hash(password || "zenixadmin123", 10);
-      await prisma.user.create({
-        data: { storeId: req.storeId, name, email, password: hashed, role: "ADMIN" },
-      });
-    } else {
+    // 1. PROCURA O ADMIN NA TABELA NOVA DE FUNCIONÁRIOS (Padrão Master)
+    let adminEmployee = await prisma.employee.findFirst({ 
+      where: { role: "ADMIN", storeId: req.storeId } 
+    });
+
+    if (adminEmployee) {
       const updateData = { name, email };
-      if (password && password.trim() !== "") updateData.password = await bcrypt.hash(password, 10);
+      if (password && password.trim() !== "") {
+        updateData.password = await bcrypt.hash(password, 10);
+      }
+      
+      await prisma.employee.update({
+        where: { id: adminEmployee.id },
+        data: updateData,
+      });
+      return res.json({ success: true });
+    }
+
+    // 2. PROCURA O ADMIN NA TABELA ANTIGA DE USUÁRIOS (Lojas Legadas)
+    let adminUser = await prisma.user.findFirst({ 
+      where: { role: "ADMIN", storeId: req.storeId } 
+    });
+    
+    if (adminUser) {
+      const updateData = { name, email };
+      if (password && password.trim() !== "") {
+        updateData.password = await bcrypt.hash(password, 10);
+      }
+      
       await prisma.user.update({
         where: { id: adminUser.id },
         data: updateData,
       });
+      return res.json({ success: true });
     }
-    res.json({ success: true });
+
+    // Se não achar em nenhum lugar (improvável, mas evita o erro 500)
+    return res.status(404).json({ error: "Conta de administrador não encontrada." });
+
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT ADMIN PROFILE:", e);
+    // Agora capturamos se o e-mail digitado já estiver em uso por outro funcionário
+    if (e.code === 'P2002') {
+      return res.status(400).json({ error: "Este e-mail já está sendo usado por outra conta." });
+    }
+    res.status(500).json({ error: "Erro interno ao atualizar perfil." });
   }
 });
 
