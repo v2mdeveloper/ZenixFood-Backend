@@ -1,0 +1,11 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    { "name": "MP_ACCESS_TOKEN", "description": "MercadoPago access token for payments (optional; per-store tokens are used when present)", "requiredAtBoot": false },
+    { "name": "GEMINI_API_KEY", "description": "Google Gemini API key for AI features (optional)", "requiredAtBoot": false },
+    { "name": "FOCUS_TOKEN", "description": "Focus NFe token for fiscal document issuance (optional)", "requiredAtBoot": false },
+    { "name": "LUXAND_API_TOKEN", "description": "Luxand API token for face-recognition employee login (optional)", "requiredAtBoot": false }
+  ]
+}
