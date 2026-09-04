@@ -3225,14 +3225,26 @@ app.post('/api/master/stores', async (req, res) => {
     const loginEmail = cleanEmpty(data.ownerEmail) || cleanEmpty(data.companyEmail) || `admin@${data.slug}.com`;
     const loginCpf = cleanEmpty(data.ownerCpf) || '00000000000';
 
+    // Cria o perfil de acesso "Administrador" para a nova loja (profileId é obrigatório em Employee)
+    const adminProfile = await prisma.accessProfile.create({
+      data: {
+        storeId: newStore.id,
+        name: 'Administrador',
+        permissions: JSON.stringify(['gestao', 'pdv', 'salao', 'kds', 'expedicao', 'historico', 'turnos', 'produtos', 'categorias', 'promocoes', 'estoque', 'analytics', 'crm', 'fornecedores', 'impressoes', 'fiscal', 'config'])
+      }
+    });
+
+    const hashedPassword = await bcrypt.hash('123456', 10);
     await prisma.employee.create({
       data: {
         name: data.ownerName || `Administrador - ${data.name}`, email: loginEmail, cpf: loginCpf,
-        password: '123456', role: 'ADMIN', isActive: true, receivesTips: false, storeId: newStore.id
+        password: hashedPassword, role: 'ADMIN', profileId: adminProfile.id,
+        isActive: true, receivesTips: false, storeId: newStore.id
       }
     });
     res.json({ success: true, store: newStore });
   } catch (error) {
+    console.error('ERRO POST /api/master/stores:', error);
     if (error.code === 'P2002') return res.status(400).json({ success: false, error: `Os dados do campo ${error.meta.target} já estão em uso.` });
     res.status(500).json({ success: false, error: 'Erro interno ao cadastrar loja.' });
   }
