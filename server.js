@@ -998,6 +998,7 @@ app.get("/api/avaliacoes", async (req, res) => {
     res.status(500).json({ error: "Erro" });
   }
 });
+
 app.post("/api/avaliacoes", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
@@ -1384,13 +1385,15 @@ app.post("/api/rh/employee-accounts/pay", async (req, res) => {
   }
 });
 
+// ==========================================
 // MENU E PRODUTOS (SaaS)
+// ==========================================
 app.get("/api/menu", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(
       await prisma.category.findMany({
-        where: { storeId: req.storeId }, // 🚨 SAAS FILTER
+        where: { storeId: req.storeId },
         orderBy: { order: "asc" },
         include: {
           products: { where: { isActive: true }, orderBy: { order: "asc" } },
@@ -1398,9 +1401,11 @@ app.get("/api/menu", async (req, res) => {
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET MENU:", e);
+    res.status(500).json({ error: "Erro ao carregar cardápio." });
   }
 });
+
 app.put("/api/categories/reorder", async (req, res) => {
   const { categories } = req.body;
   try {
@@ -1409,9 +1414,11 @@ app.put("/api/categories/reorder", async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO REORDER CATEGORIES:", e);
+    res.status(500).json({ error: "Erro ao reordenar categorias." });
   }
 });
+
 app.put("/api/products/reorder", async (req, res) => {
   const { products } = req.body;
   try {
@@ -1420,28 +1427,32 @@ app.put("/api/products/reorder", async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO REORDER PRODUCTS:", e);
+    res.status(500).json({ error: "Erro ao reordenar produtos." });
   }
 });
+
 app.get("/api/products/highlights", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(
       await prisma.product.findMany({
-        where: { storeId: req.storeId, isFeatured: true, isActive: true }, // 🚨 SAAS FILTER
+        where: { storeId: req.storeId, isFeatured: true, isActive: true },
         take: 5,
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET HIGHLIGHTS:", e);
+    res.status(500).json({ error: "Erro ao buscar destaques." });
   }
 });
+
 app.get("/api/products", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(
       await prisma.product.findMany({
-        where: { storeId: req.storeId }, // 🚨 SAAS FILTER
+        where: { storeId: req.storeId },
         include: {
           category: true,
           fichasTecnicas: { include: { insumo: true } },
@@ -1450,16 +1461,18 @@ app.get("/api/products", async (req, res) => {
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET PRODUCTS:", e);
+    res.status(500).json({ error: "Erro ao buscar produtos." });
   }
 });
+
 app.post("/api/products", async (req, res) => {
   const { name, description, price, price700g, price1kg, categoryId, imageUrl, regraFiscalId, ncm, ean, groupId } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     const newProduct = await prisma.product.create({
       data: {
-        storeId: req.storeId, // 🚨 AMARRA À LOJA
+        storeId: req.storeId,
         name, description, price: Number(price),
         price700g: price700g ? Number(price700g) : null, price1kg: price1kg ? Number(price1kg) : null,
         categoryId, imageUrl, regraFiscalId, ncm, ean, groupId: groupId || null, isActive: true,
@@ -1467,10 +1480,13 @@ app.post("/api/products", async (req, res) => {
     });
     res.status(201).json({ success: true, product: newProduct });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST PRODUCTS:", e);
+    res.status(500).json({ error: "Erro ao criar produto." });
   }
 });
+
 app.put("/api/products/:id", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   const { name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId } = req.body;
   try {
     const updated = await prisma.product.update({
@@ -1478,14 +1494,16 @@ app.put("/api/products/:id", async (req, res) => {
       data: {
         name, description, price: Number(price),
         price700g: price700g ? Number(price700g) : null, price1kg: price1kg ? Number(price1kg) : null,
-        categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId: groupId || null, isActive: true,
+        categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId: groupId || null,
       },
     });
     res.json({ success: true, product: updated });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT PRODUCTS:", e);
+    res.status(500).json({ error: "Erro ao atualizar produto." });
   }
 });
+
 app.put("/api/products/:id/feature", async (req, res) => {
   try {
     res.json({
@@ -1496,7 +1514,8 @@ app.put("/api/products/:id/feature", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT FEATURE:", e);
+    res.status(500).json({ error: "Erro ao destacar produto." });
   }
 });
 
@@ -1508,7 +1527,7 @@ app.post("/api/categories", async (req, res) => {
       success: true,
       category: await prisma.category.create({
         data: {
-          storeId: req.storeId, // 🚨 SaaS
+          storeId: req.storeId,
           name: req.body.name,
           slug: req.body.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-"),
           order: count,
@@ -1517,7 +1536,8 @@ app.post("/api/categories", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST CATEGORIES:", e);
+    res.status(500).json({ error: "Erro ao criar categoria." });
   }
 });
 
@@ -1535,7 +1555,8 @@ app.put("/api/categories/:id", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT CATEGORIES:", e);
+    res.status(500).json({ error: "Erro ao atualizar categoria." });
   }
 });
 
@@ -1544,7 +1565,8 @@ app.delete("/api/categories/:id", async (req, res) => {
     await prisma.category.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE CATEGORIES:", e);
+    res.status(500).json({ error: "Existem produtos vinculados a esta categoria." });
   }
 });
 
@@ -1563,7 +1585,9 @@ async function recalcularCustoProduto(productId) {
       where: { id: productId },
       data: { costPrice: novoCusto },
     });
-  } catch (err) {}
+  } catch (err) {
+    console.error("ERRO AO RECALCULAR CUSTO:", err);
+  }
 }
 
 app.get("/api/products/:id/fichas", async (req, res) => {
@@ -1571,12 +1595,13 @@ app.get("/api/products/:id/fichas", async (req, res) => {
   try {
     res.json(
       await prisma.fichaTecnica.findMany({
-        where: { productId: req.params.id, product: { storeId: req.storeId } }, // 🚨 SaaS
+        where: { productId: req.params.id, product: { storeId: req.storeId } },
         include: { insumo: true },
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET FICHAS:", e);
+    res.status(500).json({ error: "Erro ao buscar fichas técnicas." });
   }
 });
 
@@ -1590,7 +1615,8 @@ app.post("/api/products/:id/fichas", async (req, res) => {
     await recalcularCustoProduto(req.params.id);
     res.json({ success: true, ficha });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST FICHAS:", e);
+    res.status(500).json({ error: "Erro ao criar ficha técnica." });
   }
 });
 
@@ -1605,7 +1631,8 @@ app.delete("/api/fichas/:id", async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE FICHAS:", e);
+    res.status(500).json({ error: "Erro ao excluir ficha." });
   }
 });
 
@@ -1613,11 +1640,12 @@ app.get("/api/insumos", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(await prisma.insumo.findMany({ 
-      where: { storeId: req.storeId }, // 🚨 SaaS
+      where: { storeId: req.storeId },
       orderBy: { name: "asc" } 
     }));
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET INSUMOS:", e);
+    res.status(500).json({ error: "Erro ao buscar insumos." });
   }
 });
 
@@ -1628,7 +1656,7 @@ app.post("/api/insumos", async (req, res) => {
       success: true,
       insumo: await prisma.insumo.create({
         data: {
-          storeId: req.storeId, // 🚨 SaaS
+          storeId: req.storeId,
           name: req.body.name,
           unit: req.body.unit,
           cost: Number(req.body.cost),
@@ -1637,7 +1665,8 @@ app.post("/api/insumos", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST INSUMOS:", e);
+    res.status(500).json({ error: "Erro ao criar insumo." });
   }
 });
 
@@ -1659,9 +1688,11 @@ app.put("/api/insumos/:id", async (req, res) => {
     for (const f of fichasAfetadas) await recalcularCustoProduto(f.productId);
     res.json({ success: true, insumo: insumoAtualizado });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT INSUMOS:", e);
+    res.status(500).json({ error: "Erro ao atualizar insumo." });
   }
 });
+
 
 app.get("/api/estoque/movimentacoes", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
@@ -1987,19 +2018,22 @@ app.get("/api/kds", async (req, res) => {
   }
 });
 
-// 15. SALÃO E ENTREGAS (MESAS, COMANDAS E DESPACHOS)
+// ==========================================
+// 15. SALÃO (MESAS E COMANDAS)
+// ==========================================
 app.get("/api/salao/tabs", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(
       await prisma.restaurantTab.findMany({
-        where: { storeId: req.storeId, status: "OPEN" }, // 🚨 SaaS
+        where: { storeId: req.storeId, status: "OPEN" },
         include: { items: true },
         orderBy: { number: "asc" },
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET TABS:", e);
+    res.status(500).json({ error: "Erro ao buscar mesas." });
   }
 });
 
@@ -2008,7 +2042,7 @@ app.post("/api/salao/tabs/open", async (req, res) => {
   const { number, customerName, customerCpf, customerBirthDate, openedBy, customerId, customerType, managerAuth } = req.body;
   try {
     const existing = await prisma.restaurantTab.findFirst({
-      where: { storeId: req.storeId, number: Number(number), status: "OPEN" }, // 🚨 SaaS
+      where: { storeId: req.storeId, number: Number(number), status: "OPEN" },
     });
     if (existing) return res.status(400).json({ error: `Atendimento ${number} já aberto.` });
 
@@ -2074,7 +2108,7 @@ app.post("/api/salao/tabs/open", async (req, res) => {
 
     const tab = await prisma.restaurantTab.create({
       data: {
-        storeId: req.storeId, // 🚨 SaaS
+        storeId: req.storeId,
         number: Number(number), type: Number(number) >= 1000 ? "TAB" : "TABLE",
         customerName: customerName || null, customerCpf: customerCpf || null,
         openedBy, shiftId: currentShift.id,
@@ -2082,7 +2116,7 @@ app.post("/api/salao/tabs/open", async (req, res) => {
     });
 
     if (debtToTransfer > 0) {
-      const p = await getDividaProduct(req.storeId); // Passando storeId
+      const p = await getDividaProduct(req.storeId);
       await prisma.tabItem.create({
         data: {
           tabId: tab.id, productId: p.id, name: "Acerto de Dívida (Puxado)",
@@ -2105,7 +2139,8 @@ app.post("/api/salao/tabs/open", async (req, res) => {
     }
     res.status(201).json({ success: true, tab });
   } catch (e) {
-    res.status(500).json({ error: "Erro interno." });
+    console.error("ERRO OPEN TAB:", e);
+    res.status(500).json({ error: "Erro interno ao abrir mesa." });
   }
 });
 
@@ -2125,7 +2160,7 @@ app.post("/api/salao/tabs/:tabId/items", async (req, res) => {
 
       if (orConditions.length > 0) {
         const employee = await prisma.employee.findFirst({
-          where: { storeId: req.storeId, OR: orConditions }, // 🚨 SaaS
+          where: { storeId: req.storeId, OR: orConditions },
         });
         if (employee) {
           const newItemsTotal = items.reduce((acc, i) => acc + Number(i.price) * Number(i.quantity), 0);
@@ -2133,7 +2168,7 @@ app.post("/api/salao/tabs/:tabId/items", async (req, res) => {
           const grossTotal = currentTabTotal + newItemsTotal;
           const netTotal = grossTotal - grossTotal * ((employee.discountPercent || 0) / 100);
 
-          const ruleCheck = await checkEmployeeAccountRules(employee.id, netTotal, managerAuth, req.storeId); // Passando storeId
+          const ruleCheck = await checkEmployeeAccountRules(employee.id, netTotal, managerAuth, req.storeId);
           if (!ruleCheck.success) return res.status(400).json(ruleCheck);
         }
       }
@@ -2153,7 +2188,8 @@ app.post("/api/salao/tabs/:tabId/items", async (req, res) => {
     }
     res.json({ success: true, items: createdItems });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO POST TAB ITEMS:", e);
+    res.status(500).json({ error: "Erro ao adicionar itens à mesa." });
   }
 });
 
@@ -2167,7 +2203,8 @@ app.put("/api/salao/items/:itemId/status", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT ITEM STATUS:", e);
+    res.status(500).json({ error: "Erro ao atualizar status do item." });
   }
 });
 
@@ -2176,7 +2213,8 @@ app.delete("/api/salao/items/:itemId", async (req, res) => {
     await prisma.tabItem.delete({ where: { id: req.params.itemId } });
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO DELETE TAB ITEM:", e);
+    res.status(500).json({ error: "Erro ao excluir item da mesa." });
   }
 });
 
@@ -2191,7 +2229,8 @@ app.post("/api/salao/items/transfer", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO TRANSFER TAB ITEM:", e);
+    res.status(500).json({ error: "Erro ao transferir item." });
   }
 });
 
@@ -2199,13 +2238,14 @@ app.get("/api/salao/tabs/number/:number", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     const tab = await prisma.restaurantTab.findFirst({
-      where: { storeId: req.storeId, number: Number(req.params.number), status: "OPEN" }, // 🚨 SaaS
+      where: { storeId: req.storeId, number: Number(req.params.number), status: "OPEN" },
       include: { items: true },
     });
     if (!tab) return res.status(404).json({ error: "Não encontrado." });
     res.json(tab);
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET TAB BY NUMBER:", e);
+    res.status(500).json({ error: "Erro ao buscar mesa." });
   }
 });
 
@@ -2219,7 +2259,8 @@ app.put("/api/salao/tabs/:tabId/link", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO LINK TAB:", e);
+    res.status(500).json({ error: "Erro ao vincular mesa." });
   }
 });
 
@@ -2248,7 +2289,8 @@ app.post("/api/salao/tabs/merge", async (req, res) => {
     ]);
     res.json({ success: true });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO MERGE TABS:", e);
+    res.status(500).json({ error: "Erro ao mesclar comandas." });
   }
 });
 
@@ -2263,7 +2305,8 @@ app.post("/api/salao/tabs/:tabId/cancel", async (req, res) => {
       }),
     });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO CANCEL TAB:", e);
+    res.status(500).json({ error: "Erro ao cancelar mesa." });
   }
 });
 
@@ -2277,7 +2320,7 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
       where: { id: tabId }, include: { items: true },
     });
     let salaoUser = await prisma.user.findFirst({
-      where: { email: "lancamento@canone.com", storeId: req.storeId }, // 🚨 SaaS
+      where: { email: "lancamento@canone.com", storeId: req.storeId },
     });
     if (!salaoUser) {
       salaoUser = await prisma.user.create({
@@ -2302,7 +2345,7 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
       const empData = await prisma.employee.findUnique({ where: { id: employeeBuyerId } });
       if (empData && empData.discountPercent > 0) totalToPay = totalToPay - totalToPay * (empData.discountPercent / 100);
 
-      const ruleCheck = await checkEmployeeAccountRules(employeeBuyerId, totalToPay, managerAuth, req.storeId); // Passando storeId
+      const ruleCheck = await checkEmployeeAccountRules(employeeBuyerId, totalToPay, managerAuth, req.storeId);
       if (!ruleCheck.success) return res.status(400).json(ruleCheck);
     }
 
@@ -2314,7 +2357,7 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
 
     const order = await prisma.order.create({
       data: {
-        storeId: req.storeId, // 🚨 SaaS
+        storeId: req.storeId,
         clientId: clientId || salaoUser.id,
         address: `Consumo Mesa/Comanda ${tab.number}`,
         paymentMethod, total: totalToPay, deliveryFee: 0, cashbackUsed: 0,
@@ -2353,13 +2396,16 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
 
     res.json({ success: true, order, totalPaid: totalToPay });
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO CLOSE TAB:", e);
+    res.status(500).json({ error: "Erro ao fechar conta." });
   }
 });
 
-// 16. PEDIDOS (APP, TOTEM E SALÃO) - SaaS
 
-// ROTA UNIFICADA PARA CRIAR PEDIDOS DE APP, TOTEM E SALÃO
+// ============================================================================
+// 16. PEDIDOS (APP, TOTEM E SALÃO) - SaaS
+// ============================================================================
+
 app.post("/api/orders", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   
@@ -2587,7 +2633,6 @@ app.post("/api/orders", async (req, res) => {
     const externalRef = createdOrders.map((o) => o.id).join("|");
 
    if (paymentMethod === "PIX_ONLINE" && finalOrigin !== "PDV") {
-      // 🔑 BUSCA A CHAVE DO MERCADO PAGO DA LOJA ESPECÍFICA NO BANCO
       const store = await prisma.store.findUnique({ where: { id: req.storeId } });
       const tokenMP = store?.mpAccessToken || process.env.MP_ACCESS_TOKEN;
       const clientMP = new MercadoPagoConfig({ accessToken: tokenMP });
@@ -2618,7 +2663,6 @@ app.post("/api/orders", async (req, res) => {
     }
 
     if (paymentMethod === "CREDIT_CARD_ONLINE" && mpData && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV") {
-      // 🔑 BUSCA A CHAVE DO MERCADO PAGO DA LOJA ESPECÍFICA NO BANCO
       const store = await prisma.store.findUnique({ where: { id: req.storeId } });
       const tokenMP = store?.mpAccessToken || process.env.MP_ACCESS_TOKEN;
       const clientMP = new MercadoPagoConfig({ accessToken: tokenMP });
@@ -2652,6 +2696,7 @@ app.post("/api/orders", async (req, res) => {
 
     res.status(201).json({ success: true, order: mainOrder, discountApplied: finalDiscount, newBalance });
   } catch (error) {
+    console.error("ERRO POST ORDERS:", error);
     res.status(500).json({ error: "Erro ao processar o pedido" });
   }
 });
@@ -2668,7 +2713,12 @@ app.post("/api/orders/:id/retry-pix", async (req, res) => {
       return res.status(400).json({ error: "Pedido não está pendente ou não encontrado." });
     }
 
+    // Corrigido para buscar o token dinâmico da loja correspondente ao pedido
+    const store = await prisma.store.findUnique({ where: { id: order.storeId } });
+    const tokenMP = store?.mpAccessToken || process.env.MP_ACCESS_TOKEN;
+    const clientMP = new MercadoPagoConfig({ accessToken: tokenMP });
     const payment = new Payment(clientMP);
+
     const externalRef = `${order.id}|RETRY`; 
     
     const paymentData = await payment.create({
@@ -2694,6 +2744,7 @@ app.post("/api/orders/:id/retry-pix", async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("ERRO RETRY PIX:", error);
     res.status(500).json({ error: "Erro ao gerar novo PIX." });
   }
 });
@@ -2704,7 +2755,6 @@ app.post("/api/webhook", async (req, res) => {
   res.status(200).send("OK");
   if (type === "payment") {
     try {
-      // 1. Primeiro descobre qual é o pedido no banco para saber a loja
       const refs = data.external_reference ? data.external_reference.split("|") : [];
       if (refs.length === 0) return;
       
@@ -2712,11 +2762,9 @@ app.post("/api/webhook", async (req, res) => {
       const currentOrder = await prisma.order.findUnique({ where: { id: firstOrderId } });
       if (!currentOrder) return;
 
-      // 2. Busca a chave do Mercado Pago específica daquela loja
       const store = await prisma.store.findUnique({ where: { id: currentOrder.storeId } });
       const tokenMP = store?.mpAccessToken || process.env.MP_ACCESS_TOKEN;
 
-      // 3. Consulta o pagamento no Mercado Pago usando a credencial correta
       const response = await fetch(
         `https://api.mercadopago.com/v1/payments/${data.id}`,
         { headers: { Authorization: `Bearer ${tokenMP}` } }
@@ -2736,12 +2784,14 @@ app.post("/api/webhook", async (req, res) => {
         }
       }
     } catch (error) {
-      console.error("Erro no Webhook MP:", error);
+      console.error("ERRO NO WEBHOOK MP:", error);
     }
   }
 });
 
+// ============================================================================
 // 17. ROTAS DE PEDIDOS (LISTAGEM E STATUS - SaaS)
+// ============================================================================
 
 app.get("/api/orders", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
@@ -2758,45 +2808,52 @@ app.get("/api/orders", async (req, res) => {
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET ORDERS:", e);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
 app.get("/api/orders/client/:clientId", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
     res.json(
       await prisma.order.findMany({
-        where: { clientId: req.params.clientId },
+        where: { clientId: req.params.clientId, storeId: req.storeId }, // 🚨 SAAS FILTER
         include: { items: { include: { product: true } } },
         orderBy: { createdAt: "desc" },
       })
     );
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET ORDERS BY CLIENT:", e);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
 app.get("/api/orders/:id/status", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
-    const order = await prisma.order.findUnique({
-      where: { id: req.params.id },
+    const order = await prisma.order.findFirst({
+      where: { id: req.params.id, storeId: req.storeId }, // 🚨 SAAS FILTER
       select: { status: true },
     });
-    if (!order) return res.status(404).json({ error: "Nao encontrado" });
+    if (!order) return res.status(404).json({ error: "Pedido não encontrado." });
     res.json(order);
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET ORDER STATUS:", e);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
 app.put("/api/orders/:id/status", async (req, res) => {
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   const { status } = req.body;
   try {
-    const order = await prisma.order.findUnique({
-      where: { id: req.params.id },
+    const order = await prisma.order.findFirst({
+      where: { id: req.params.id, storeId: req.storeId }, // 🚨 SAAS FILTER
       include: { client: { include: { cashback: true } }, items: true },
     });
-    if (!order) return res.status(404).json({ error: "Erro" });
+    if (!order) return res.status(404).json({ error: "Pedido não encontrado." });
+    
     const [updatedOrder, updatedWallet] = await prisma.$transaction([
       prisma.order.update({ where: { id: order.id }, data: { status } }),
     ]);
@@ -2805,11 +2862,14 @@ app.put("/api/orders/:id/status", async (req, res) => {
       newBalance: updatedWallet ? updatedWallet.balance : 0,
     });
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO PUT ORDER STATUS:", error);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
+// ============================================================================
 // 18. CANCELAMENTO DE PEDIDOS E ENTREGAS (SaaS)
+// ============================================================================
 
 app.put("/api/orders/:id/cancel", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
@@ -2836,6 +2896,7 @@ app.put("/api/orders/:id/cancel", async (req, res) => {
     });
     res.json({ success: true, order: updatedOrder });
   } catch (error) {
+    console.error("ERRO CANCEL ORDER:", error);
     res.status(500).json({ error: "Erro ao cancelar pedido" });
   }
 });
@@ -2849,7 +2910,8 @@ app.get("/api/rh/delivery-persons", async (req, res) => {
     });
     res.json(entregadores);
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET DELIVERY PERSONS:", e);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
@@ -2863,6 +2925,7 @@ app.put("/api/orders/dispatch", async (req, res) => {
     });
     res.json({ success: true });
   } catch (error) {
+    console.error("ERRO DISPATCH ORDERS:", error);
     res.status(500).json({ error: "Erro ao despachar pedidos" });
   }
 });
@@ -2877,7 +2940,8 @@ app.get("/api/delivery/my-orders/:employeeId", async (req, res) => {
     });
     res.json(orders);
   } catch (e) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO GET MY ORDERS:", e);
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
@@ -2907,11 +2971,15 @@ app.post("/api/delivery/confirm", async (req, res) => {
     });
     res.json({ success: true });
   } catch (error) {
+    console.error("ERRO DELIVERY CONFIRM:", error);
     res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
+// ============================================================================
 // 19. MÓDULO FISCAL (FOCUS NFE - SaaS)
+// ============================================================================
+
 app.post("/api/admin/orders/:id/fiscal", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   const { id } = req.params;
@@ -2968,7 +3036,9 @@ app.post("/api/admin/orders/:id/fiscal", async (req, res) => {
           return res.status(200).json({ success: true, fiscalData: fiscalDataObj });
         }
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Falha ao checar NFe:", err);
+    }
 
     const regrasFiscais = await getFiscalData(req.storeId);
     const configuracoes = await getSettings(req.storeId);
@@ -3070,11 +3140,15 @@ app.post("/api/admin/orders/:id/fiscal", async (req, res) => {
       return res.status(400).json({ error: "Falha ao autorizar NFC-e", details: dadosRetorno });
     }
   } catch (error) {
+    console.error("ERRO POST FISCAL ORDER:", error);
     return res.status(500).json({ error: "Erro interno", details: error.message });
   }
 });
 
+// ============================================================================
 // 20. ANALYTICS E INTELIGÊNCIA ARTIFICIAL (GEMINI - SaaS)
+// ============================================================================
+
 app.post("/api/analytics/visit", async (req, res) => {
   try {
     const { userId, device } = req.body;
@@ -3087,6 +3161,7 @@ app.post("/api/analytics/visit", async (req, res) => {
     });
     res.json({ success: true });
   } catch (e) {
+    console.error("ERRO POST VISIT:", e);
     res.status(500).json({ error: "Erro ao registrar visita" });
   }
 });
@@ -3104,6 +3179,7 @@ app.get("/api/admin/analytics", async (req, res) => {
     });
     res.json({ success: true, visits, totalVisits });
   } catch (e) {
+    console.error("ERRO GET ANALYTICS:", e);
     res.status(500).json({ error: "Erro ao buscar acessos" });
   }
 });
@@ -3126,6 +3202,7 @@ app.delete("/api/admin/analytics", async (req, res) => {
     }
     res.json({ success: true, message: "Logs de acesso apagados com sucesso." });
   } catch (error) {
+    console.error("ERRO DELETE ANALYTICS:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -3168,6 +3245,7 @@ app.post("/api/ai/receitas/gerar", async (req, res) => {
     if (!recipeData) return res.status(500).json({ error: `O Google recusou todos os modelos. Último erro: ${lastError}` });
     res.json({ success: true, receita: recipeData });
   } catch (error) {
+    console.error("ERRO GERAR RECEITA IA:", error);
     res.status(500).json({ error: "Falha ao processar a resposta da rede do Google." });
   }
 });
@@ -3195,6 +3273,7 @@ app.post("/api/ai/receitas/aprovar", async (req, res) => {
     }
     res.json({ success: true, receita, insumosCriados });
   } catch (error) {
+    console.error("ERRO APROVAR RECEITA IA:", error);
     res.status(500).json({ error: "Erro ao salvar a receita." });
   }
 });
@@ -3204,6 +3283,7 @@ app.get("/api/ai/receitas", async (req, res) => {
   try {
     res.json(await prisma.receita.findMany({ where: { storeId: req.storeId }, orderBy: { criadoEm: "desc" } })); // 🚨 SaaS
   } catch (e) {
+    console.error("ERRO GET RECEITAS IA:", e);
     res.status(500).json({ error: "Erro ao buscar receitas." });
   }
 });
@@ -3245,10 +3325,10 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
     if (!analiseData) return res.status(500).json({ error: `Falha na IA. Último erro: ${lastError}` });
     res.json({ success: true, analise: analiseData });
   } catch (error) {
+    console.error("ERRO ANALISE IA:", error);
     res.status(500).json({ error: "Erro de conexão com o Google." });
   }
 });
-
 
 // ============================================================================
 // ROTAS MASTER: GESTÃO GLOBAL DE LOJAS
@@ -3292,10 +3372,11 @@ app.post('/api/master/stores', async (req, res) => {
       data: {
         name: data.ownerName || `Administrador - ${data.name}`, email: loginEmail, cpf: loginCpf,
         password: hashedPassword, role: 'ADMIN', profileId: adminProfile.id,
-        isActive: true, receivesTips: false, storeId: newStore.id
+        isActive: true, receivesTips: false, storeId: newStore.id,
+        creditLimit: 0, discountPercent: 0
       }
     });
-    res.json({ success: true, store: newStore });
+    res.status(201).json({ success: true, store: newStore });
   } catch (error) {
     console.error('ERRO POST /api/master/stores:', error);
     if (error.code === 'P2002') return res.status(400).json({ success: false, error: `Os dados do campo ${error.meta.target} já estão em uso.` });
@@ -3321,6 +3402,7 @@ app.put('/api/master/stores/:id', async (req, res) => {
     });
     res.json({ success: true, store: updatedStore });
   } catch (error) {
+    console.error('ERRO PUT MASTER STORE:', error);
     res.status(500).json({ success: false, error: 'Erro ao atualizar loja.' });
   }
 });
@@ -3332,12 +3414,12 @@ app.put('/api/master/stores/:id/status', async (req, res) => {
     });
     res.json({ success: true, store: updatedStore });
   } catch (error) {
+    console.error('ERRO PUT MASTER STORE STATUS:', error);
     res.status(500).json({ success: false, error: 'Erro ao bloquear loja.' });
   }
 });
 
 // ROTAS DE CONFIGURAÇÕES DA LOJA (SETTINGS) E VISUAL
-
 app.get("/api/settings", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente" });
   try {
@@ -3352,6 +3434,7 @@ app.get("/api/settings", async (req, res) => {
 
     res.json({ ...settings, ...store, isOpen });
   } catch (error) {
+    console.error("ERRO GET SETTINGS:", error);
     res.status(500).json({ error: "Erro ao buscar settings" });
   }
 });
@@ -3385,12 +3468,12 @@ app.put("/api/settings", async (req, res) => {
 
     res.json({ success: true, settings: updatedSettings });
   } catch (error) {
+    console.error("ERRO PUT SETTINGS:", error);
     res.status(500).json({ error: "Erro ao salvar config no banco." });
   }
 });
 
 // ROTAS PÚBLICAS (CARDÁPIO DIGITAL E TOTEM) - SEM NECESSIDADE DE LOGIN
-
 app.get('/api/stores/slug/:slug', async (req, res) => {
   try {
     const store = await prisma.store.findUnique({ where: { slug: req.params.slug } });
@@ -3398,6 +3481,7 @@ app.get('/api/stores/slug/:slug', async (req, res) => {
     
     res.json({ success: true, store });
   } catch (error) {
+    console.error("ERRO GET STORE SLUG:", error);
     res.status(500).json({ success: false, error: 'Erro interno ao buscar loja.' });
   }
 });
@@ -3420,6 +3504,7 @@ app.get('/api/menu/public/:slug', async (req, res) => {
     
     res.json(menu);
   } catch (error) {
+    console.error("ERRO GET PUBLIC MENU:", error);
     res.status(500).json({ success: false, error: 'Erro interno ao carregar o cardápio.' });
   }
 });
