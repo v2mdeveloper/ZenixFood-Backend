@@ -579,19 +579,25 @@ app.delete("/api/admin/suppliers/:id", async (req, res) => {
 // ROTA: DADOS DA EMPRESA E ASSINATURA (SaaS)
 app.get('/api/admin/store-info', async (req, res) => {
   try {
-    // Puxa o ID da loja injetado pelo wrapper no front-end
-    const storeId = req.headers['x-store-id'];
+    // Puxa o ID (ou slug) já tratado pelo nosso middleware de segurança
+    const storeId = req.storeId || req.headers['x-store-id'];
 
     if (!storeId) {
       return res.status(400).json({ 
         success: false, 
-        error: 'ID da loja não fornecido no cabeçalho.' 
+        error: 'ID da loja não fornecido.' 
       });
     }
 
-    // Busca a loja diretamente no banco de dados com Prisma
-    const store = await prisma.store.findUnique({
-      where: { id: storeId }
+    // 🎯 INTELIGÊNCIA: Tenta buscar a loja tanto pelo ID real quanto pelo Slug
+    // Se o frontend mandar o Slug por engano, o sistema encontra a loja do mesmo jeito!
+    const store = await prisma.store.findFirst({
+      where: {
+        OR: [
+          { id: storeId },
+          { slug: storeId }
+        ]
+      }
     });
 
     if (!store) {
@@ -608,7 +614,7 @@ app.get('/api/admin/store-info', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erro ao buscar dados da empresa:', error);
+    console.error('ERRO GET STORE INFO:', error);
     res.status(500).json({ 
       success: false, 
       error: 'Erro interno no servidor ao buscar dados da empresa.' 
