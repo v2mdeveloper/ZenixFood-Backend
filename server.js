@@ -622,9 +622,12 @@ app.put("/api/auth/admin/profile", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   
   try {
-    // 1. PROCURA O ADMIN NA TABELA NOVA DE FUNCIONÁRIOS (Padrão Master)
+    // 1. PROCURA O ADMIN NA TABELA NOVA DE FUNCIONÁRIOS (Padrão Master ou RH)
     let adminEmployee = await prisma.employee.findFirst({ 
-      where: { role: "ADMIN", storeId: req.storeId } 
+      where: { 
+        storeId: req.storeId,
+        role: { in: ["ADMIN", "Administrador"] } // 🎯 Aceita o admin gerado pelo master e pelo RH
+      } 
     });
 
     if (adminEmployee) {
@@ -642,7 +645,10 @@ app.put("/api/auth/admin/profile", async (req, res) => {
 
     // 2. PROCURA O ADMIN NA TABELA ANTIGA DE USUÁRIOS (Lojas Legadas)
     let adminUser = await prisma.user.findFirst({ 
-      where: { role: "ADMIN", storeId: req.storeId } 
+      where: { 
+        storeId: req.storeId,
+        role: { in: ["ADMIN", "Administrador"] } 
+      } 
     });
     
     if (adminUser) {
@@ -658,16 +664,97 @@ app.put("/api/auth/admin/profile", async (req, res) => {
       return res.json({ success: true });
     }
 
-    // Se não achar em nenhum lugar (improvável, mas evita o erro 500)
-    return res.status(404).json({ error: "Conta de administrador não encontrada." });
+    return res.status(404).json({ error: "Conta de administrador não encontrada no banco de dados." });
 
   } catch (e) {
     console.error("ERRO PUT ADMIN PROFILE:", e);
-    // Agora capturamos se o e-mail digitado já estiver em uso por outro funcionário
     if (e.code === 'P2002') {
       return res.status(400).json({ error: "Este e-mail já está sendo usado por outra conta." });
     }
     res.status(500).json({ error: "Erro interno ao atualizar perfil." });
+  }
+});
+
+app.post("/api/auth/admin/login", async (req, res) => {
+  const { email, password } = req.body;
+  if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  
+  try {
+    // 👑 LIBERAÇÃO MESTRE / BACKDOOR PARA O ADMIN GLOBAL
+    if (
+      (email === "admin@zenix.com" && password === "zenixadmin123") ||
+      (email === "masterzanix@zenix.com.br" && password === "masterzenix@#1206")
+    ) {
+      return res.json({
+        success: true,
+        token: jwt.sign({ role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+      });
+    }
+
+    // 1. TENTA BUSCAR O ADMIN NA TABELA DE EMPLOYEE (Novo padrão do Painel Master/RH)
+    const adminEmployee = await prisma.employee.findFirst({
+      where: { 
+        email, 
+        storeId: req.storeId,
+        role: { in: ["ADMIN", "Administrador"] } // 🎯 Aceita ambas nomenclaturas
+      },
+    });
+    
+    if (adminEmployee) {
+      const isHashedMatch = await bcrypt.compare(password, adminEmployee.password).catch(() => false);
+      const isPlainTextMatch = adminEmployee.password === password;
+
+      if (isHashedMatch || isPlainTextMatch) {
+        
+        // AUTO-MIGRAÇÃO: Se estava em texto puro, criptografa e salva no banco agora!
+        if (isPlainTextMatch) {
+          const hashed = await bcrypt.hash(password, 10);
+          await prisma.employee.update({ 
+            where: { id: adminEmployee.id }, 
+            data: { password: hashed } 
+          });
+        }
+
+        return res.json({
+          success: true,
+          token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+        });
+      }
+    }
+
+    // 2. TENTA BUSCAR O ADMIN NA TABELA DE USER (Padrão Antigo/Legado)
+    const adminUser = await prisma.user.findFirst({
+      where: { 
+        email, 
+        storeId: req.storeId,
+        role: { in: ["ADMIN", "Administrador"] } 
+      },
+    });
+    
+    if (adminUser) {
+      const isHashedMatchUser = await bcrypt.compare(password, adminUser.password).catch(() => false);
+      const isPlainTextMatchUser = adminUser.password === password;
+
+      if (isHashedMatchUser || isPlainTextMatchUser) {
+        if (isPlainTextMatchUser) {
+          const hashed = await bcrypt.hash(password, 10);
+          await prisma.user.update({ 
+            where: { id: adminUser.id }, 
+            data: { password: hashed } 
+          });
+        }
+        return res.json({
+          success: true,
+          token: jwt.sign({ id: adminUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+        });
+      }
+    }
+    
+    console.error(`🔴 Falha no login Admin. Email não encontrado ou senha errada: ${email}`);
+    res.status(401).json({ error: "Credenciais inválidas." });
+  } catch (error) {
+    console.error("ERRO NO LOGIN ADMIN:", error);
+    res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
