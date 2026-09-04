@@ -3346,19 +3346,23 @@ app.post('/api/master/stores', async (req, res) => {
       data: {
         name: data.name, slug: data.slug, corporateName: cleanEmpty(data.corporateName),
         documentCnpj: cleanEmpty(data.cnpj), stateRegistration: cleanEmpty(data.stateRegistration),
-        municipalRegistration: cleanEmpty(data.municipalRegistration), email: cleanEmpty(data.companyEmail),              
-        phone: cleanEmpty(data.companyPhone), ownerName: cleanEmpty(data.ownerName),
-        ownerCpf: cleanEmpty(data.ownerCpf), ownerEmail: cleanEmpty(data.ownerEmail),
+        municipalRegistration: cleanEmpty(data.municipalRegistration), 
+        email: cleanEmpty(data.companyEmail) || cleanEmpty(data.email), // 🎯 Agora aceita o campo "email" genérico
+        phone: cleanEmpty(data.companyPhone) || cleanEmpty(data.phone), // 🎯 Agora aceita "phone" genérico
+        ownerName: cleanEmpty(data.ownerName),
+        ownerCpf: cleanEmpty(data.ownerCpf), 
+        ownerEmail: cleanEmpty(data.ownerEmail),
         ownerPhone: cleanEmpty(data.ownerPhone), address: cleanEmpty(data.address),
         logoUrl: cleanEmpty(data.logoUrl), plan: data.plan || 'STANDARD',
         status: 'ACTIVE', subscriptionStatus: 'TRIAL'            
       }
     });
 
-    const loginEmail = cleanEmpty(data.ownerEmail) || cleanEmpty(data.companyEmail) || `admin@${data.slug}.com`;
+    // 🎯 Captura qualquer um dos e-mails preenchidos, do mais específico para o mais genérico
+    const loginEmail = cleanEmpty(data.ownerEmail) || cleanEmpty(data.companyEmail) || cleanEmpty(data.email) || `admin@${data.slug}.com`;
     const loginCpf = cleanEmpty(data.ownerCpf) || '00000000000';
 
-    // Cria o perfil de acesso "Administrador" para a nova loja (profileId é obrigatório em Employee)
+    // Cria o perfil de acesso "Administrador" para a nova loja
     const adminProfile = await prisma.accessProfile.create({
       data: {
         storeId: newStore.id,
@@ -3370,8 +3374,12 @@ app.post('/api/master/stores', async (req, res) => {
     const hashedPassword = await bcrypt.hash('123456', 10);
     await prisma.employee.create({
       data: {
-        name: data.ownerName || `Administrador - ${data.name}`, email: loginEmail, cpf: loginCpf,
-        password: hashedPassword, role: 'ADMIN', profileId: adminProfile.id,
+        name: data.ownerName || `Administrador - ${data.name}`, 
+        email: loginEmail, 
+        cpf: loginCpf,
+        password: hashedPassword, 
+        role: 'ADMIN', 
+        profileId: adminProfile.id,
         isActive: true, receivesTips: false, storeId: newStore.id,
         creditLimit: 0, discountPercent: 0
       }
