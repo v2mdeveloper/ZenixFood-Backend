@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zenix
+      POSTGRES_PASSWORD: zenixpass
+      POSTGRES_DB: zenix
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zenix -d zenix"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    image: node:22
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - node_modules:/app/node_modules
+    environment:
+      DATABASE_URL: postgresql://zenix:zenixpass@db:5432/zenix?schema=public
+      JWT_SECRET: base44_dev_jwt_secret_change_me
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npx prisma generate && npx prisma db push --accept-data-loss && node --watch server.js"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  node_modules:

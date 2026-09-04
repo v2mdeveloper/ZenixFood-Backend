@@ -22,6 +22,10 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+app.get("/", (req, res) => {
+  res.json({ name: "ZenixFood SaaS API", status: "ok", version: "1.0.0" });
+});
+
 app.get("/api/master/stores", MasterAdminController.listAllStores);
 app.put("/api/master/stores/:id/modules", MasterAdminController.updateStoreModules);
 
