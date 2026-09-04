@@ -662,13 +662,27 @@ app.post("/api/auth/admin/login", async (req, res) => {
       where: { email, role: "ADMIN", storeId: req.storeId },
     });
     
-    if (adminEmployee && (await bcrypt.compare(password, adminEmployee.password))) {
-      return res.json({
-        success: true,
-        token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, {
-          expiresIn: "1d",
-        }),
-      });
+    if (adminEmployee) {
+      // Verifica se a senha bate com a Criptografia OU se ainda está em texto puro (criada antes da correção)
+      const isHashedMatch = await bcrypt.compare(password, adminEmployee.password).catch(() => false);
+      const isPlainTextMatch = adminEmployee.password === password;
+
+      if (isHashedMatch || isPlainTextMatch) {
+        
+        // AUTO-MIGRAÇÃO: Se estava em texto puro, criptografa e salva no banco agora!
+        if (isPlainTextMatch) {
+          const hashed = await bcrypt.hash(password, 10);
+          await prisma.employee.update({ 
+            where: { id: adminEmployee.id }, 
+            data: { password: hashed } 
+          });
+        }
+
+        return res.json({
+          success: true,
+          token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+        });
+      }
     }
 
     // 2. TENTA BUSCAR O ADMIN NA TABELA DE USER (Padrão Antigo/Legado)
@@ -676,16 +690,29 @@ app.post("/api/auth/admin/login", async (req, res) => {
       where: { email, role: "ADMIN", storeId: req.storeId },
     });
     
-    if (adminUser && (await bcrypt.compare(password, adminUser.password))) {
-      return res.json({
-        success: true,
-        token: jwt.sign({ id: adminUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, {
-          expiresIn: "1d",
-        }),
-      });
+    if (adminUser) {
+      const isHashedMatchUser = await bcrypt.compare(password, adminUser.password).catch(() => false);
+      const isPlainTextMatchUser = adminUser.password === password;
+
+      if (isHashedMatchUser || isPlainTextMatchUser) {
+        
+        if (isPlainTextMatchUser) {
+          const hashed = await bcrypt.hash(password, 10);
+          await prisma.user.update({ 
+            where: { id: adminUser.id }, 
+            data: { password: hashed } 
+          });
+        }
+
+        return res.json({
+          success: true,
+          token: jwt.sign({ id: adminUser.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
+        });
+      }
     }
     
-    // Se não achou em nenhuma das tabelas ou a senha está errada:
+    // Se a senha estiver mesmo errada ou o email não existir:
+    console.error(`🔴 Falha no login Admin. Email não encontrado ou senha errada: ${email}`);
     res.status(401).json({ error: "Credenciais inválidas." });
   } catch (error) {
     console.error("ERRO NO LOGIN ADMIN:", error);
