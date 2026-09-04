@@ -1030,6 +1030,12 @@ app.get("/api/rh/profiles", async (req, res) => {
 app.post("/api/rh/profiles", async (req, res) => {
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
   try {
+    // 🛡️ TRAVA DE SEGURANÇA: Garante que a loja existe no banco antes de tentar criar o perfil
+    const storeExists = await prisma.store.findUnique({ where: { id: req.storeId } });
+    if (!storeExists) {
+      return res.status(400).json({ error: "A loja informada não existe mais no banco. Faça logout e login novamente para atualizar sua sessão." });
+    }
+
     const { name, permissions } = req.body;
     if (!name) return res.status(400).json({ error: "O nome do perfil é obrigatório." });
 
