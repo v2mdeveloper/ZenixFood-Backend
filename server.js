@@ -644,6 +644,7 @@ app.put("/api/auth/admin/profile", async (req, res) => {
 app.post("/api/auth/admin/login", async (req, res) => {
   const { email, password } = req.body;
   if (!req.storeId) return res.status(400).json({ error: "Store ID ausente." });
+  
   try {
     // 👑 LIBERAÇÃO MESTRE / BACKDOOR PARA O ADMIN GLOBAL
     if (
@@ -655,10 +656,26 @@ app.post("/api/auth/admin/login", async (req, res) => {
         token: jwt.sign({ role: "ADMIN", storeId: req.storeId }, JWT_SECRET, { expiresIn: "1d" }),
       });
     }
-         
+
+    // 1. TENTA BUSCAR O ADMIN NA TABELA DE EMPLOYEE (Novo padrão do Painel Master)
+    const adminEmployee = await prisma.employee.findFirst({
+      where: { email, role: "ADMIN", storeId: req.storeId },
+    });
+    
+    if (adminEmployee && (await bcrypt.compare(password, adminEmployee.password))) {
+      return res.json({
+        success: true,
+        token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", storeId: req.storeId }, JWT_SECRET, {
+          expiresIn: "1d",
+        }),
+      });
+    }
+
+    // 2. TENTA BUSCAR O ADMIN NA TABELA DE USER (Padrão Antigo/Legado)
     const adminUser = await prisma.user.findFirst({
       where: { email, role: "ADMIN", storeId: req.storeId },
     });
+    
     if (adminUser && (await bcrypt.compare(password, adminUser.password))) {
       return res.json({
         success: true,
@@ -667,9 +684,12 @@ app.post("/api/auth/admin/login", async (req, res) => {
         }),
       });
     }
+    
+    // Se não achou em nenhuma das tabelas ou a senha está errada:
     res.status(401).json({ error: "Credenciais inválidas." });
   } catch (error) {
-    res.status(500).json({ error: "Erro" });
+    console.error("ERRO NO LOGIN ADMIN:", error);
+    res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
