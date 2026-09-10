@@ -8,83 +8,69 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-// SAAS CORE: MODELO DE LOJAS (TENANTS)
-
-model Store {
-  id                    String   @id @default(uuid())
-  name                  String
-  slug                  String   @unique
+// 🚨 ZENIXFOOD: TABELA MASTER QUE CONTROLA TODAS AS LOJAS (SaaS)
+model Loja {
+  id                 String    @id @default(uuid())
+  slug               String    @unique // Ex: "burgerking" (usado para gerar burgerking.zenixfood.com.br)
+  razaoSocial        String
+  cnpj               String    @unique
+  inscricaoEstadual  String?
+  inscricaoMunicipal String?
+  endereco           String?
+  emailEmpresa       String
+  telefoneEmpresa    String
+  regimeTributario   String?
   
-  //DADOS JURÍDICOS E CONTATO DA EMPRESA
-  corporateName         String?
-  documentCnpj          String?  @unique
-  stateRegistration     String?
-  municipalRegistration String?
-  email                 String?  @unique
-  phone                 String?
-  address               String?
-  logoUrl               String?
-
-  //DADOS DO RESPONSÁVEL / SÓCIO
-  ownerName             String?
-  ownerCpf              String?
-  ownerEmail            String?
-  ownerPhone            String?
-
-  //MÓDULOS CONTRATADOS
-  activeDelivery        Boolean  @default(true)
-  activeTotem           Boolean  @default(false)
-  activeKds             Boolean  @default(false)
-  activeFiscal          Boolean  @default(false)
-
-  //GESTÃO DE ASSINATURA E STATUS (SaaS)
-  plan                  String   @default("STANDARD")
-  monthlyFee            Float    @default(0.00)
-  subscriptionStatus    String   @default("TRIAL")
-  subscriptionDueDate   DateTime? 
-  status                String   @default("ACTIVE")
+  // Dados do Responsável pela Loja (Dono)
+  nomeResponsavel    String
+  cpfResponsavel     String
+  emailResponsavel   String    @unique // Este será o e-mail de acesso master da loja
+  senhaResponsavel   String    // Senha de acesso
   
-  //CHAVES DE INTEGRAÇÃO INDIVIDUAIS
-  mpPublicKey           String?
-  mpAccessToken         String?
-  focusEnv              String   @default("homologacao")
-  focusToken            String?
+  // Controle de Módulos SaaS (O que você vende para eles)
+  isActive           Boolean   @default(true)
+  modulosAtivos      Json      @default("[\"PDV\", \"KDS\", \"SALAO\"]") // Módulos que eles pagaram
+  dataVencimento     DateTime?
   
-  //CONFIGURAÇÕES DA LOJA
-  deliveryFee           Float    @default(0.00)
-  cashbackPercent       Float    @default(0.00)
-  isManualFechado       Boolean  @default(false)
-  youtubeLiveId         String?
-  aboutUsText           String?
-  promoBannerUrl        String?
-  promoBannerLink       String?
-  schedule              Json?
-  coverImageUrl       String?
-  totemCoverImageUrl  String?
-  ifoodLink           String?  
-  ninetyNineFoodLink  String? 
+  // Personalização White-Label da Loja (Totem/Cardápio)
+  corPrincipal       String    @default("#F59E0B")
+  logoUrl            String?
+  cabecalhoHtml      String?
+  rodapeHtml         String?
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  //RELACIONAMENTOS REVERSOS
-  users          User[]
-  categories     Category[]
-  products       Product[]
-  productGroups  ProductGroup[]
-  orders         Order[]
-  systemConfigs  SystemConfig[]
-  avaliacoes     Avaliacao[]
-  insumos        Insumo[]
-  settings       Settings[]
-  fiscalConfigs  FiscalConfig[]
-  receitas       Receita[]
-  profiles       AccessProfile[]
-  employees      Employee[]
-  shifts         Shift[]
-  tabs           RestaurantTab[]
-  printers       Printer[]
+  // 🚨 RELACIONAMENTOS: Tudo no sistema agora "pertence" a uma loja.
+  // O "Cascade" garante que, se você excluir a loja, todos os dados dela são apagados juntos.
+  usuarios           User[]
+  customerMovements  CustomerAccountMovement[]
+  cashbackWallets    CashbackWallet[]
+  categorias         Category[]
+  produtos           Product[]
+  productGroups      ProductGroup[]
+  orders             Order[]
+  orderItems         OrderItem[]
+  systemConfigs      SystemConfig[]
+  avaliacoes         Avaliacao[]
+  insumos            Insumo[]
+  fichasTecnicas     FichaTecnica[]
+  movimentacoes      MovimentacaoEstoque[]
+  settings           Settings[]
+  fiscalConfigs      FiscalConfig[]
+  accessLogs         AccessLog[]
+  receitas           Receita[]
+  accessProfiles     AccessProfile[]
+  employees          Employee[]
+  employeeMovements  EmployeeAccountMovement[]
+  employeeLogs       EmployeeLog[]
+  shifts             Shift[]
+  cashRegisters      CashRegister[]
+  cashMovements      CashMovement[]
+  restaurantTabs     RestaurantTab[]
+  tabItems           TabItem[]
+  printers           Printer[]
+  contasPagas        ContaPagar[]
 }
 
 enum Role {
@@ -101,40 +87,38 @@ enum OrderStatus {
   CANCELED
 }
 
-// =================================================================
-// MODELOS DE DADOS (ISOLADOS POR LOJA)
-// =================================================================
-
+// 🚨 ZENIXFOOD: TABELAS ADAPTADAS COM lojaId
 model User {
-  id               String   @id @default(uuid())
-  storeId          String
-  store            Store    @relation(fields: [storeId], references: [id])
+  id               String          @id @default(uuid())
+  lojaId           String
+  loja             Loja            @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   
   name             String
-  email            String   
+  email            String          // Removido o @unique global
   password         String
   phone            String?
-  cpf              String?  
-  birthDate        String?  
-  address          String?  
-  role             Role     @default(CLIENT)
-  isBlocked        Boolean  @default(false)
+  cpf              String?        
+  birthDate        String?    
+  address          String?     
+  role             Role            @default(CLIENT)
+  isBlocked        Boolean         @default(false)
   resetCode        String?
   resetCodeExpires DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  
   cashback         CashbackWallet?
   orders           Order[]
   accessLogs       AccessLog[]
   accountMovements CustomerAccountMovement[] 
 
-  // SaaS: O mesmo email pode existir no banco, mas apenas uma vez por Loja
-  @@unique([email, storeId])
+  @@unique([email, lojaId]) // O e-mail só precisa ser único DENTRO da mesma loja
 }
 
 model CustomerAccountMovement {
   id          String   @id @default(uuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   customerId  String
   customer    User     @relation(fields: [customerId], references: [id])
   type        String   
@@ -147,6 +131,8 @@ model CustomerAccountMovement {
 
 model CashbackWallet {
   id        String   @id @default(uuid())
+  lojaId    String
+  loja      Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   balance   Decimal  @default(0.00)
   userId    String   @unique
   user      User     @relation(fields: [userId], references: [id])
@@ -155,26 +141,23 @@ model CashbackWallet {
 
 model Category {
   id        String    @id @default(uuid())
-  storeId   String
-  store     Store     @relation(fields: [storeId], references: [id])
-
+  lojaId    String
+  loja      Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   name      String
-  slug      String    
+  slug      String    // Removido o @unique global
   order     Int       @default(0) 
-  isDrink   Boolean   @default(false)
+  isDrink   Boolean   @default(false) 
   products  Product[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  // SaaS: O mesmo slug pode existir em lojas diferentes
-  @@unique([slug, storeId])
+  @@unique([slug, lojaId]) // O slug de categoria é único por loja
 }
 
 model Product {
   id            String         @id @default(uuid())
-  storeId       String
-  store         Store          @relation(fields: [storeId], references: [id])
-
+  lojaId        String
+  loja          Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   name          String
   description   String?
   price         Decimal        @db.Decimal(10, 2)
@@ -195,16 +178,15 @@ model Product {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   fichasTecnicas FichaTecnica[]
-  groupId       String?
-  group         ProductGroup?  @relation(fields: [groupId], references: [id])
+  groupId   String?
+  group     ProductGroup? @relation(fields: [groupId], references: [id])
 }
 
 model ProductGroup {
   id            String    @id @default(uuid())
-  storeId       String
-  store         Store     @relation(fields: [storeId], references: [id])
-
-  name          String  
+  lojaId        String
+  loja          Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  name          String    
   printerId     String?
   regraFiscalId String?
   printer       Printer?  @relation(fields: [printerId], references: [id])
@@ -213,10 +195,9 @@ model ProductGroup {
 
 model Order {
   id                String      @id @default(uuid())
-  storeId           String
-  store             Store       @relation(fields: [storeId], references: [id])
-
-  shortId           Int         @default(autoincrement())
+  lojaId            String
+  loja              Loja        @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  shortId           Int         @default(autoincrement()) // Continua auto-increment global
   total             Decimal
   deliveryFee       Decimal     @default(0.00)
   cashbackUsed      Decimal     @default(0.00)
@@ -239,11 +220,13 @@ model Order {
   nfceData          String?
   waiter            String?
   deliveryPersonId  String?
-  deliveryPerson    Employee?   @relation(fields: [deliveryPersonId], references: [id])
+  deliveryPerson    Employee? @relation(fields: [deliveryPersonId], references: [id])
 }
 
 model OrderItem {
   id        String  @id @default(uuid())
+  lojaId    String
+  loja      Loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   quantity  Int
   price     Decimal
   orderId   String
@@ -253,16 +236,19 @@ model OrderItem {
 }
 
 model SystemConfig {
-  id      String @id
-  storeId String
-  store   Store  @relation(fields: [storeId], references: [id])
+  id      String @id @default(uuid()) // Transformado em UUID para suportar múltiplos
+  lojaId  String
+  loja    Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  key     String // "settings", "fiscal", "certificado_a1", etc.
   data    String
+
+  @@unique([key, lojaId]) // A chave de configuração é única por Loja
 }
 
 model Avaliacao {
   id          String   @id @default(uuid())
-  storeId     String
-  store       Store    @relation(fields: [storeId], references: [id])
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   clienteNome String
   nota        Int      
   comentario  String
@@ -270,48 +256,49 @@ model Avaliacao {
 }
 
 model Insumo {
-  id         String   @id @default(cuid())
-  storeId    String
-  store      Store    @relation(fields: [storeId], references: [id])
-
-  name       String   
-  unit       String   
-  stock      Float    @default(0) 
-  cost       Float    @default(0) 
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  fichas     FichaTecnica[]
-  movimentos MovimentacaoEstoque[]
+  id          String   @id @default(cuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  name        String   
+  unit        String   
+  stock       Float    @default(0) 
+  cost        Float    @default(0) 
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  fichas      FichaTecnica[]
+  movimentos  MovimentacaoEstoque[]
 }
 
 model FichaTecnica {
-  id        String   @id @default(cuid())
-  productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  insumoId  String
-  insumo    Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
-  quantity  Float    
-  
+  id          String   @id @default(cuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  insumoId    String
+  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  quantity    Float    
   @@unique([productId, insumoId]) 
 }
 
 model MovimentacaoEstoque {
-  id        String   @id @default(cuid())
-  insumoId  String
-  insumo    Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
-  type      String   
-  quantity  Float
-  reason    String?  
-  xmlRef    String?  
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  insumoId    String
+  insumo      Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  type        String   
+  quantity    Float
+  reason      String?  
+  xmlRef      String?  
+  createdAt   DateTime @default(now())
 }
 
 model Settings {
   id              String   @id @default(cuid())
-  storeId         String
-  store           Store    @relation(fields: [storeId], references: [id])
-
+  lojaId          String
+  loja            Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   isManualFechado Boolean  @default(false)
   deliveryFee     Float    @default(0)
   cashbackPercent Int      @default(0)
@@ -320,9 +307,8 @@ model Settings {
 
 model FiscalConfig {
   id        String @id @default(cuid())
-  storeId   String
-  store     Store  @relation(fields: [storeId], references: [id])
-
+  lojaId    String
+  loja      Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   icms      Json?  @default("[]")
   pisCofins Json?  @default("[]")
   regras    Json?  @default("[]")
@@ -330,6 +316,8 @@ model FiscalConfig {
 
 model AccessLog {
   id        String   @id @default(uuid())
+  lojaId    String
+  loja      Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   ip        String?
   device    String?
   userId    String?
@@ -339,9 +327,8 @@ model AccessLog {
 
 model Receita {
   id           String   @id @default(uuid())
-  storeId      String
-  store        Store    @relation(fields: [storeId], references: [id])
-
+  lojaId       String
+  loja         Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   nome         String
   ingredientes String   
   preparo      String
@@ -349,54 +336,52 @@ model Receita {
 }
 
 model AccessProfile {
-  id         String     @id @default(uuid())
-  storeId    String
-  store      Store      @relation(fields: [storeId], references: [id])
-
-  name       String     
+  id          String     @id @default(uuid())
+  lojaId      String
+  loja        Loja       @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  name        String     
   permissions String     
-  employees  Employee[]
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  employees   Employee[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  @@unique([name, storeId])
+  @@unique([name, lojaId])
 }
 
 model Employee {
-  id              String   @id @default(uuid())
-  storeId         String
-  store           Store    @relation(fields: [storeId], references: [id])
-
+  id              String        @id @default(uuid())
+  lojaId          String
+  loja            Loja          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   name            String
-  cpf             String   
+  cpf             String        
   age             String?
   address         String?
-  email           String   
+  email           String        
   phone           String?
   password        String
-  role            String   
+  role            String        
   profileId       String
   profile         AccessProfile @relation(fields: [profileId], references: [id])
-  isActive        Boolean  @default(true)
-  receivesTips    Boolean  @default(false) 
-  creditLimit     Float    @default(0.0)    
-  discountPercent Float    @default(0.0)    
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  facePhoto       String?  @db.Text  
-  lastFaceLogin   DateTime?            
-
-  logs             EmployeeLog[] 
+  isActive        Boolean       @default(true)
+  receivesTips    Boolean       @default(false) 
+  creditLimit     Float         @default(0.0)    
+  discountPercent Float         @default(0.0)    
+  logs            EmployeeLog[] 
   accountMovements EmployeeAccountMovement[] 
-  deliveries       Order[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  facePhoto       String?       @db.Text  
+  lastFaceLogin   DateTime?           
+  deliveries      Order[]
 
-  // SaaS: O mesmo CPF/Email pode trabalhar em restaurantes diferentes (ex: Entregador/Freelancer)
-  @@unique([cpf, storeId])
-  @@unique([email, storeId])
+  @@unique([cpf, lojaId])
+  @@unique([email, lojaId])
 }
 
 model EmployeeAccountMovement {
   id          String   @id @default(uuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   employeeId  String
   employee    Employee @relation(fields: [employeeId], references: [id])
   type        String   
@@ -408,32 +393,36 @@ model EmployeeAccountMovement {
 }
 
 model EmployeeLog {
-  id         String   @id @default(uuid())
-  employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  action     String   
-  details    String?  
-  createdAt  DateTime @default(now())
+  id          String   @id @default(uuid())
+  lojaId      String
+  loja        Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  action      String   
+  details     String?  
+  createdAt   DateTime @default(now())
 }
 
 model Shift {
-  id        String   @id @default(uuid())
-  storeId   String
-  store     Store    @relation(fields: [storeId], references: [id])
-
-  openedAt  DateTime @default(now())
-  closedAt  DateTime?
-  status    String   @default("OPEN") 
-  openedBy  String?  
-  closedBy  String?
-  registers CashRegister[]
-  orders    Order[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String         @id @default(uuid())
+  lojaId      String
+  loja        Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  openedAt    DateTime       @default(now())
+  closedAt    DateTime?
+  status      String         @default("OPEN") 
+  openedBy    String?        
+  closedBy    String?
+  registers   CashRegister[]
+  orders      Order[]
+  contasPagas ContaPagar[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 }
 
 model CashRegister {
   id             String         @id @default(uuid())
+  lojaId         String
+  loja           Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   shiftId        String
   shift          Shift          @relation(fields: [shiftId], references: [id])
   openedBy       String         
@@ -443,7 +432,7 @@ model CashRegister {
   status         String         @default("OPEN") 
   openingBalance Float          @default(0.0) 
   closingBalance Float?
-  closingDetails String?        
+  closingDetails String?       
   movements      CashMovement[]
   orders         Order[]
   createdAt      DateTime       @default(now())
@@ -451,21 +440,22 @@ model CashRegister {
 }
 
 model CashMovement {
-  id           String       @id @default(uuid())
-  registerId   String
-  register     CashRegister @relation(fields: [registerId], references: [id])
-  type         String       
-  amount       Float
-  reason       String
-  authorizedBy String       
-  createdAt    DateTime     @default(now())
+  id             String       @id @default(uuid())
+  lojaId         String
+  loja           Loja         @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  registerId     String
+  register       CashRegister @relation(fields: [registerId], references: [id])
+  type           String       
+  amount         Float
+  reason         String
+  authorizedBy   String       
+  createdAt      DateTime     @default(now())
 }
 
 model RestaurantTab {
   id           String    @id @default(uuid())
-  storeId      String
-  store        Store     @relation(fields: [storeId], references: [id])
-
+  lojaId       String
+  loja         Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   number       Int       
   type         String    
   status       String    @default("OPEN") 
@@ -475,15 +465,16 @@ model RestaurantTab {
   seatLabel    String?   
   openedBy     String    
   shiftId      String    
-  linkedTable  Int?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
   items        TabItem[]
+  createdAt    DateTime  @default(now())
+  linkedTable  Int?
+  updatedAt    DateTime  @updatedAt
 }
 
 model TabItem {
   id          String        @id @default(uuid())
+  lojaId      String
+  loja        Loja          @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   tabId       String
   tab         RestaurantTab @relation(fields: [tabId], references: [id])
   productId   String
@@ -491,7 +482,7 @@ model TabItem {
   price       Float
   quantity    Int
   observation String?
-  seatLabel   String?        
+  seatLabel   String?       
   status      String        @default("PENDING") 
   createdAt   DateTime      @default(now())
   product     Product       @relation(fields: [productId], references: [id]) 
@@ -499,11 +490,28 @@ model TabItem {
 
 model Printer {
   id        String         @id @default(uuid())
-  storeId   String
-  store     Store          @relation(fields: [storeId], references: [id])
-
+  lojaId    String
+  loja      Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   name      String
   type      String         @default("USB") 
   address   String         
   groups    ProductGroup[]
+}
+
+model ContaPagar {
+  id              String    @id @default(uuid())
+  lojaId          String
+  loja            Loja      @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  descricao       String
+  valor           Float
+  dataVencimento  DateTime
+  dataPagamento   DateTime?
+  status          String    @default("PENDENTE") 
+  metodoPagamento String?   
+  fornecedor      String?   
+  shiftId         String?
+  shift           Shift?    @relation(fields: [shiftId], references: [id])
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
