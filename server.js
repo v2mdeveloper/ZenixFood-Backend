@@ -2410,7 +2410,7 @@ app.post("/api/salao/tabs/open", async (req, res) => {
                 finalCustomerId = existingUser.id;
             } else if (customerName) {
                 const randomPassword = await bcrypt.hash(
-                    "canone" + Math.floor(Math.random() * 10000),
+                    "zenixfood" + Math.floor(Math.random() * 10000),
                     10
                 );
                 const newUser = await prisma.user.create({
@@ -2755,14 +2755,14 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
             include: { items: true },
         });
         let salaoUser = await prisma.user.findFirst({
-            where: { email: "lancamento@canone.com", lojaId: req.lojaId },
+            where: { email: "lancamento@zenixfood.com", lojaId: req.lojaId },
         });
         if (!salaoUser) {
             salaoUser = await prisma.user.create({
                 data: {
                     lojaId: req.lojaId,
                     name: "App de Lançamento",
-                    email: "lancamento@canone.com",
+                    email: "lancamento@zenixfood.com",
                     password: await bcrypt.hash("lancamentosenha", 10),
                     role: "CLIENT",
                     cashback: { create: { balance: 0.0, lojaId: req.lojaId } },
@@ -3032,7 +3032,7 @@ app.post("/api/orders", async (req, res) => {
     let finalClientId = clientId;
     if (!clientId || clientId === "TOTEM_MODE") {
         let totemUser = await prisma.user.findFirst({
-            where: { email: "totem@canone.com", lojaId: req.lojaId },
+            where: { email: "totem@zenixfood.com", lojaId: req.lojaId },
         });
         if (!totemUser) {
             const randomPassword = await bcrypt.hash("totem", 10);
@@ -3040,7 +3040,7 @@ app.post("/api/orders", async (req, res) => {
                 data: {
                     lojaId: req.lojaId,
                     name: "Totem Autoatendimento",
-                    email: "totem@canone.com",
+                    email: "totem@zenixfood.com",
                     password: randomPassword,
                     role: "CLIENT",
                     cashback: { create: { balance: 0.0, lojaId: req.lojaId } },
@@ -3347,7 +3347,7 @@ app.post("/api/orders", async (req, res) => {
                     },
                     external_reference: externalRef,
                     notification_url:
-                        "https://canone-backend.onrender.com/api/webhook",
+                        "https://zenixfood-backend.onrender.com/api/webhook",
                 },
             });
             return res
@@ -3389,7 +3389,7 @@ app.post("/api/orders", async (req, res) => {
                     },
                     external_reference: externalRef,
                     notification_url:
-                        "https://canone-backend.onrender.com/api/webhook",
+                        "https://zenixfood-backend.onrender.com/api/webhook",
                 },
             });
             if (
@@ -3451,7 +3451,7 @@ app.post("/api/orders/:id/retry-pix", async (req, res) => {
                 },
                 external_reference: externalRef,
                 notification_url:
-                    "https://canone-backend.onrender.com/api/webhook",
+                    "https://zenixfood-backend.onrender.com/api/webhook",
             },
         });
 
