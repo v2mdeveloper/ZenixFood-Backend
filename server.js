@@ -39,7 +39,8 @@ app.use(async (req, res, next) => {
     if (req.path.startsWith("/api/master")) return next();
     if (req.path === "/api/webhook") return next();
 
-    const lojaSlug = req.headers["x-loja-slug"];
+    // INTELIGÊNCIA: Agora ele lê tanto o slug quanto o storeId do frontend
+    const lojaSlug = req.headers["x-loja-slug"] || req.headers["x-store-id"];
     const lojaIdHeader = req.headers["x-loja-id"];
 
     try {
@@ -48,31 +49,32 @@ app.use(async (req, res, next) => {
         if (lojaIdHeader) {
             loja = await prisma.loja.findUnique({ where: { id: lojaIdHeader } });
         } else if (lojaSlug) {
-            loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
-            
-            //CORREÇÃO: Se enviou um slug e não achou no banco, rejeita imediatamente! (Sem Fallback)
+            // Tenta achar pelo slug OU pelo ID 
+            loja = await prisma.loja.findFirst({
+                where: { OR: [{ slug: lojaSlug }, { id: lojaSlug }] }
+            });
             if (!loja) return res.status(404).json({ success: false, error: "Loja não encontrada." });
         }
 
-        //Fallback para desenvolvimento local: pega a primeira loja APENAS se nenhum slug foi enviado
+        // Fallback para desenvolvimento local
         if (!loja && !lojaSlug && !lojaIdHeader && req.path !== "/api/master/lojas") {
             loja = await prisma.loja.findFirst();
             if (!loja) return res.status(403).json({ error: "SaaS: Nenhuma loja vinculada no banco." });
         }
 
         if (loja) {
-            //TRAVA DE SEGURANÇA (Bloqueio do Master)
+            // TRAVA DE SEGURANÇA (Redireciona inadimplentes)
             if ((loja.status === 'BLOCKED' || loja.isActive === false) && !req.path.includes('/api/admin/store-info')) {
                 return res.status(402).json({ error: "Acesso bloqueado por pendências financeiras." });
             }
-
             req.lojaId = loja.id;
             req.lojaInfo = loja;
         }
 
         next();
     } catch (error) {
-        res.status(500).json({ error: "Erro de Tenant ID" });
+        console.error("ERRO MIDDLEWARE:", error);
+        res.status(500).json({ error: "Erro interno ao validar a Loja" });
     }
 });
 
@@ -311,23 +313,14 @@ app.get("/api/master/lojas", async (req, res) => {
     }
 });
 
+// Rota para criar uma nova loja (Master)
 app.post("/api/master/lojas", async (req, res) => {
     try {
         const {
-            slug,
-            razaoSocial,
-            cnpj,
-            inscricaoEstadual,
-            inscricaoMunicipal,
-            endereco,
-            emailEmpresa,
-            telefoneEmpresa,
-            regimeTributario,
-            nomeResponsavel,
-            cpfResponsavel,
-            emailResponsavel,
-            senhaResponsavel,
-            modulosAtivos,
+            slug, razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal,
+            endereco, emailEmpresa, telefoneEmpresa, regimeTributario,
+            nomeResponsavel, cpfResponsavel, emailResponsavel, senhaResponsavel,
+            modulosAtivos, plan, monthlyFee // 🎯 AGORA RECEBE O PLANO E O VALOR
         } = req.body;
 
         const existingLoja = await prisma.loja.findFirst({
@@ -335,94 +328,46 @@ app.post("/api/master/lojas", async (req, res) => {
         });
 
         if (existingLoja)
-            return res
-                .status(400)
-                .json({
-                    error:
-                        "Slug, CNPJ ou E-mail do Responsável já estão em uso em outra loja.",
-                });
+            return res.status(400).json({ error: "Slug, CNPJ ou E-mail do Responsável já estão em uso." });
 
         const novaLoja = await prisma.loja.create({
             data: {
                 slug: slug.toLowerCase().trim().replace(/\s+/g, "-"),
-                razaoSocial,
-                cnpj,
-                inscricaoEstadual,
-                inscricaoMunicipal,
-                endereco,
-                emailEmpresa,
-                telefoneEmpresa,
-                regimeTributario,
-                nomeResponsavel,
-                cpfResponsavel,
-                emailResponsavel,
-                senhaResponsavel,
-                modulosAtivos:
-                    modulosAtivos || JSON.stringify(["PDV", "KDS", "SALAO"]),
+                razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, endereco,
+                emailEmpresa, telefoneEmpresa, regimeTributario,
+                nomeResponsavel, cpfResponsavel, emailResponsavel, senhaResponsavel,
+                plan: plan || "STANDARD",               // SALVA O PLANO
+                monthlyFee: Number(monthlyFee) || 0.0,  // SALVA O VALOR DA MENSALIDADE
+                status: "ACTIVE",                       // STATUS ATIVO POR PADRÃO
+                modulosAtivos: modulosAtivos || JSON.stringify(["PDV", "KDS", "SALAO", "ESTOQUE", "FINANCEIRO", "FISCAL"]),
             },
         });
 
         const hashedAdminPassword = await bcrypt.hash(senhaResponsavel, 10);
+        
+        // Dá permissão total ("gestao") ao dono da loja
         const perfilAdmin = await prisma.accessProfile.create({
-            data: {
-                lojaId: novaLoja.id,
-                name: "Gerente Master",
-                permissions: JSON.stringify([
-                    "gestao",
-                    "pdv",
-                    "salao",
-                    "kds",
-                    "expedicao",
-                    "historico",
-                    "turnos",
-                    "contas_pagar",
-                    "relatorio_financeiro",
-                    "analytics",
-                    "produtos",
-                    "categorias",
-                    "promocoes",
-                    "crm",
-                    "fornecedores",
-                    "rh",
-                    "estoque",
-                    "impressoes",
-                    "fiscal",
-                    "config",
-                ]),
-            },
+            data: { lojaId: novaLoja.id, name: "Gerente Master", permissions: JSON.stringify(["gestao"]) },
         });
 
         await prisma.employee.create({
             data: {
-                lojaId: novaLoja.id,
-                name: nomeResponsavel,
-                cpf: cpfResponsavel,
-                email: emailResponsavel,
-                password: hashedAdminPassword,
-                role: "Gerente Master",
-                profileId: perfilAdmin.id,
-                isActive: true,
+                lojaId: novaLoja.id, name: nomeResponsavel, cpf: cpfResponsavel, email: emailResponsavel,
+                password: hashedAdminPassword, role: "Gerente Master", profileId: perfilAdmin.id, isActive: true,
             },
         });
 
         await prisma.systemConfig.create({
             data: {
-                key: "settings",
-                lojaId: novaLoja.id,
-                data: JSON.stringify({
-                    isManualFechado: false,
-                    deliveryFee: 5.0,
-                    schedule: {},
-                }),
+                key: "settings", lojaId: novaLoja.id,
+                data: JSON.stringify({ isManualFechado: false, deliveryFee: 5.0, schedule: {} }),
             },
         });
 
         res.status(201).json({ success: true, loja: novaLoja });
     } catch (error) {
-        res.status(500).json({
-            error: "Erro ao gerar a base da Loja.",
-            details: error.message,
-        });
+        console.error("ERRO MASTER CRIAR LOJA:", error);
+        res.status(500).json({ error: "Erro ao gerar a base da Loja.", details: error.message });
     }
 });
 
@@ -445,90 +390,55 @@ app.put("/api/master/lojas/:id", async (req, res) => {
 // Rota de Login do Administrador
 app.post("/api/auth/admin/login", async (req, res) => {
     const { email, password } = req.body;
-    
-    // Verifica se a loja foi identificada pelo middleware
-    if (!req.lojaId) return res.status(400).json({ error: "Loja não identificada." });
+
+    if (!req.lojaId) return res.status(400).json({ error: "Loja não identificada. Verifique o link de acesso." });
+    if (!email || !password) return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
 
     try {
-        // 👑 BACKDOOR MESTRE (Acesso universal para suporte)
-        if (email === "admin@zenix.com" && password === "zenixadmin123") {
-            const realAdmin = await prisma.employee.findFirst({
-                where: { 
-                    lojaId: req.lojaId, 
-                    role: { in: ["ADMIN", "Administrador", "Gerente Master"] } 
-                }
-            });
-
-            if (realAdmin) {
-                return res.json({
-                    success: true,
-                    token: jwt.sign({ id: realAdmin.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
-                });
-            } else {
-                return res.json({
-                    success: true,
-                    token: jwt.sign({ id: "BACKDOOR", role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
-                });
-            }
-        }
-
-        // 1. TENTA NA TABELA EMPLOYEE (Padrão atual: "Gerente Master", "Administrador")
+        // 1. Busca na tabela de Funcionários (Master/RH)
         const adminEmployee = await prisma.employee.findFirst({
-            where: { 
-                email, 
+            where: {
+                email: String(email),
                 lojaId: req.lojaId,
                 role: { in: ["ADMIN", "Administrador", "Gerente Master"] }
             }
         });
 
-        if (adminEmployee) {
-            const isMatch = await bcrypt.compare(password, adminEmployee.password).catch(() => false);
-            const isPlain = adminEmployee.password === password;
-
-            if (isMatch || isPlain) {
-                // Auto-correção de senha em texto puro
-                if (isPlain) {
-                    const hashed = await bcrypt.hash(password, 10);
-                    await prisma.employee.update({ where: { id: adminEmployee.id }, data: { password: hashed } });
-                }
-                return res.json({
-                    success: true,
-                    token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
-                });
+        if (adminEmployee && adminEmployee.password) {
+            const isPasswordValid = await bcrypt.compare(String(password), adminEmployee.password);
+            if (isPasswordValid) {
+                const token = jwt.sign(
+                    { id: adminEmployee.id, role: "ADMIN", lojaId: req.lojaId },
+                    process.env.JWT_SECRET || "fallback_secret_key",
+                    { expiresIn: "1d" }
+                );
+                return res.json({ success: true, token });
             }
         }
 
-        // 2. TENTA NA TABELA USER (Lojas antigas/Legado)
+        // 2. Busca na tabela de Usuários (Legado)
         const adminUser = await prisma.user.findFirst({
-            where: { 
-                email, 
-                lojaId: req.lojaId,
-                role: { in: ["ADMIN", "Administrador", "Gerente Master"] }
-            }
+            where: { email: String(email), lojaId: req.lojaId, role: "ADMIN" }
         });
 
-        if (adminUser) {
-            const isMatch = await bcrypt.compare(password, adminUser.password).catch(() => false);
-            const isPlain = adminUser.password === password;
-
-            if (isMatch || isPlain) {
-                if (isPlain) {
-                    const hashed = await bcrypt.hash(password, 10);
-                    await prisma.user.update({ where: { id: adminUser.id }, data: { password: hashed } });
-                }
-                return res.json({
-                    success: true,
-                    token: jwt.sign({ id: adminUser.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
-                });
+        if (adminUser && adminUser.password) {
+            const isPasswordValid = await bcrypt.compare(String(password), adminUser.password);
+            if (isPasswordValid) {
+                const token = jwt.sign(
+                    { id: adminUser.id, role: "ADMIN", lojaId: req.lojaId },
+                    process.env.JWT_SECRET || "fallback_secret_key",
+                    { expiresIn: "1d" }
+                );
+                return res.json({ success: true, token });
             }
         }
 
-        // Se não encontrou ou a senha está errada
-        return res.status(401).json({ error: "Credenciais inválidas." });
+        return res.status(401).json({ error: "E-mail ou senha inválidos." });
 
     } catch (error) {
         console.error("ERRO NO LOGIN ADMIN:", error);
-        res.status(500).json({ error: "Erro interno do servidor." });
+        // Agora, se der erro 500, o frontend vai te mostrar exatamente o porquê!
+        res.status(500).json({ error: "Erro interno: " + error.message });
     }
 });
 
