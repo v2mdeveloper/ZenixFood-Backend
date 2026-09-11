@@ -38,8 +38,10 @@ const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
 app.use(async (req, res, next) => {
     if (req.path.startsWith("/api/master")) return next();
     if (req.path === "/api/webhook") return next();
+    
+    // 🎯 LIBERA O TOTEM: Deixa as requisições públicas passarem direto
+    if (req.path.includes("/public/")) return next();
 
-    // INTELIGÊNCIA: Agora ele lê tanto o slug quanto o storeId do frontend
     const lojaSlug = req.headers["x-loja-slug"] || req.headers["x-store-id"];
     const lojaIdHeader = req.headers["x-loja-id"];
 
