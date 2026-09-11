@@ -37,6 +37,10 @@ model Loja {
   logoUrl            String?
   cabecalhoHtml      String?
   rodapeHtml         String?
+  
+  plan               String    @default("STANDARD")
+  monthlyFee         Float     @default(0.0)
+  status             String    @default("ACTIVE")
 
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

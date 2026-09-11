@@ -575,6 +575,67 @@ app.put("/api/auth/admin/profile", async (req, res) => {
 });
 
 // ==============================================================
+// DADOS DA EMPRESA E FATURAS (PAINEL DO INQUILINO)
+// ==============================================================
+app.get('/api/admin/store-info', async (req, res) => {
+  try {
+    // req.lojaId vem do seu middleware SaaS
+    if (!req.lojaId) return res.status(400).json({ success: false, error: 'Loja não identificada.' });
+
+    const store = await prisma.loja.findUnique({
+      where: { id: req.lojaId }
+    });
+
+    if (!store) {
+      return res.status(404).json({ success: false, error: 'Loja não encontrada no banco de dados.' });
+    }
+
+    // 🎯 SIMULAÇÃO DE FATURAS E BOLETOS CORA
+    // Prepara a estrutura exata que será populada pela API do Banco Cora futuramente.
+    const dataAtual = new Date();
+    
+    // Calcula o próximo vencimento (Sempre dia 10 do mês atual ou próximo mês)
+    let vencimentoProximo = new Date(dataAtual.getFullYear(), dataAtual.getMonth(), 10);
+    if (dataAtual.getDate() > 10) {
+      vencimentoProximo.setMonth(vencimentoProximo.getMonth() + 1);
+    }
+
+    const valorMensalidade = store.monthlyFee ? Number(store.monthlyFee) : 149.90;
+
+    // Faturas Mockadas para popular o layout
+    const mockInvoices = [
+      {
+        id: `FAT-CORA-${vencimentoProximo.getTime()}`,
+        reference: `Mensalidade Sistema - ${vencimentoProximo.toLocaleString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}`,
+        amount: valorMensalidade,
+        dueDate: vencimentoProximo.toISOString(),
+        status: store.isActive === false ? 'OVERDUE' : 'PENDING',
+        pdfUrl: 'https://www.cora.com.br/boleto-simulado.pdf' // ⬅️ Aqui entrará o link do PDF do Cora
+      },
+      {
+        id: `FAT-CORA-${new Date(dataAtual.getFullYear(), dataAtual.getMonth() - 1, 10).getTime()}`,
+        reference: `Mensalidade Sistema - ${new Date(dataAtual.getFullYear(), dataAtual.getMonth() - 1, 10).toLocaleString('pt-BR', { month: 'long', year: 'numeric' }).toUpperCase()}`,
+        amount: valorMensalidade,
+        dueDate: new Date(dataAtual.getFullYear(), dataAtual.getMonth() - 1, 10).toISOString(),
+        status: 'PAID',
+        pdfUrl: 'https://www.cora.com.br/boleto-simulado.pdf'
+      }
+    ];
+
+    res.json({ 
+      success: true, 
+      store: store,
+      invoices: mockInvoices,
+      nextPaymentDate: vencimentoProximo.toISOString()
+    });
+
+  } catch (error) {
+    console.error('ERRO GET STORE INFO:', error);
+    res.status(500).json({ success: false, error: 'Erro interno no servidor ao buscar dados da empresa.' });
+  }
+});
+
+// ==============================================================
 // 4. CONFIGURAÇÕES, IMPRESSORAS E MÓDULOS DE CADASTRO GERAL
 // ==============================================================
 
