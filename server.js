@@ -703,6 +703,15 @@ app.put("/api/settings", async (req, res) => {
     try {
         const currentSettings = await getSettings(req.lojaId);
         const newSettings = { ...currentSettings, ...req.body };
+        
+        // INTELIGÊNCIA: Sincroniza o logo com a tabela principal para o Painel Master e o App lerem corretamente!
+        if (req.body.logoUrl !== undefined) {
+            await prisma.loja.update({
+                where: { id: req.lojaId },
+                data: { logoUrl: req.body.logoUrl }
+            }).catch(() => {}); // Ignora se não houver mudança
+        }
+
         await prisma.systemConfig.upsert({
             where: { key_lojaId: { key: "settings", lojaId: req.lojaId } },
             update: { data: JSON.stringify(newSettings) },
@@ -984,6 +993,39 @@ app.post("/api/coupons/validate", async (req, res) => {
     if (clientId && coupon.usedBy && coupon.usedBy.includes(clientId))
         return res.status(400).json({ error: "Já utilizado." });
     res.json({ success: true, coupon });
+});
+
+// ==============================================================
+// LER E SALVAR PERFIL DO ADMINISTRADOR / FUNCIONÁRIO
+// ==============================================================
+app.get("/api/auth/admin/profile/:id", async (req, res) => {
+    try {
+        const emp = await prisma.employee.findUnique({ where: { id: req.params.id } });
+        if (emp && emp.lojaId === req.lojaId) {
+            res.json({ success: true, profile: { name: emp.name, email: emp.email } });
+        } else {
+            res.status(404).json({ error: "Perfil não encontrado" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: "Erro ao buscar perfil" });
+    }
+});
+
+app.put("/api/auth/admin/profile/:id", async (req, res) => {
+    const { name, email, password } = req.body;
+    try {
+        const dataToUpdate = { name, email };
+        if (password && password.trim() !== '') {
+            dataToUpdate.password = await bcrypt.hash(password, 10);
+        }
+        const updated = await prisma.employee.update({
+            where: { id: req.params.id },
+            data: dataToUpdate
+        });
+        res.json({ success: true, profile: { name: updated.name, email: updated.email } });
+    } catch (e) {
+        res.status(500).json({ error: "Erro ao atualizar perfil" });
+    }
 });
 
 // ==============================================================
