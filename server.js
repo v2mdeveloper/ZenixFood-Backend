@@ -49,16 +49,19 @@ app.use(async (req, res, next) => {
             loja = await prisma.loja.findUnique({ where: { id: lojaIdHeader } });
         } else if (lojaSlug) {
             loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+            
+            //CORREÇÃO: Se enviou um slug e não achou no banco, rejeita imediatamente! (Sem Fallback)
+            if (!loja) return res.status(404).json({ success: false, error: "Loja não encontrada." });
         }
 
-        if (!loja && req.path !== "/api/master/lojas") {
+        //Fallback para desenvolvimento local: pega a primeira loja APENAS se nenhum slug foi enviado
+        if (!loja && !lojaSlug && !lojaIdHeader && req.path !== "/api/master/lojas") {
             loja = await prisma.loja.findFirst();
-            if (!loja) return res.status(403).json({ error: "SaaS: Nenhuma loja vinculada." });
+            if (!loja) return res.status(403).json({ error: "SaaS: Nenhuma loja vinculada no banco." });
         }
 
         if (loja) {
-            // TRAVA DE SEGURANÇA: Se a loja foi bloqueada no Master, derruba as requisições com Erro 402
-            // Exceção: Permite apenas bater na rota store-info para que o Admin consiga baixar o boleto
+            //TRAVA DE SEGURANÇA (Bloqueio do Master)
             if ((loja.status === 'BLOCKED' || loja.isActive === false) && !req.path.includes('/api/admin/store-info')) {
                 return res.status(402).json({ error: "Acesso bloqueado por pendências financeiras." });
             }
