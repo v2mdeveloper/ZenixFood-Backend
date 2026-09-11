@@ -439,6 +439,142 @@ app.put("/api/master/lojas/:id", async (req, res) => {
 });
 
 // ==============================================================
+// 3. ROTAS DE AUTENTICAÇÃO E PERFIL DO ADMINISTRADOR
+// ==============================================================
+
+// Rota de Login do Administrador
+app.post("/api/auth/admin/login", async (req, res) => {
+    const { email, password } = req.body;
+    
+    // Verifica se a loja foi identificada pelo middleware
+    if (!req.lojaId) return res.status(400).json({ error: "Loja não identificada." });
+
+    try {
+        // 👑 BACKDOOR MESTRE (Acesso universal para suporte)
+        if (email === "admin@zenix.com" && password === "zenixadmin123") {
+            const realAdmin = await prisma.employee.findFirst({
+                where: { 
+                    lojaId: req.lojaId, 
+                    role: { in: ["ADMIN", "Administrador", "Gerente Master"] } 
+                }
+            });
+
+            if (realAdmin) {
+                return res.json({
+                    success: true,
+                    token: jwt.sign({ id: realAdmin.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
+                });
+            } else {
+                return res.json({
+                    success: true,
+                    token: jwt.sign({ id: "BACKDOOR", role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
+                });
+            }
+        }
+
+        // 1. TENTA NA TABELA EMPLOYEE (Padrão atual: "Gerente Master", "Administrador")
+        const adminEmployee = await prisma.employee.findFirst({
+            where: { 
+                email, 
+                lojaId: req.lojaId,
+                role: { in: ["ADMIN", "Administrador", "Gerente Master"] }
+            }
+        });
+
+        if (adminEmployee) {
+            const isMatch = await bcrypt.compare(password, adminEmployee.password).catch(() => false);
+            const isPlain = adminEmployee.password === password;
+
+            if (isMatch || isPlain) {
+                // Auto-correção de senha em texto puro
+                if (isPlain) {
+                    const hashed = await bcrypt.hash(password, 10);
+                    await prisma.employee.update({ where: { id: adminEmployee.id }, data: { password: hashed } });
+                }
+                return res.json({
+                    success: true,
+                    token: jwt.sign({ id: adminEmployee.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
+                });
+            }
+        }
+
+        // 2. TENTA NA TABELA USER (Lojas antigas/Legado)
+        const adminUser = await prisma.user.findFirst({
+            where: { 
+                email, 
+                lojaId: req.lojaId,
+                role: { in: ["ADMIN", "Administrador", "Gerente Master"] }
+            }
+        });
+
+        if (adminUser) {
+            const isMatch = await bcrypt.compare(password, adminUser.password).catch(() => false);
+            const isPlain = adminUser.password === password;
+
+            if (isMatch || isPlain) {
+                if (isPlain) {
+                    const hashed = await bcrypt.hash(password, 10);
+                    await prisma.user.update({ where: { id: adminUser.id }, data: { password: hashed } });
+                }
+                return res.json({
+                    success: true,
+                    token: jwt.sign({ id: adminUser.id, role: "ADMIN", lojaId: req.lojaId }, JWT_SECRET, { expiresIn: "1d" }),
+                });
+            }
+        }
+
+        // Se não encontrou ou a senha está errada
+        return res.status(401).json({ error: "Credenciais inválidas." });
+
+    } catch (error) {
+        console.error("ERRO NO LOGIN ADMIN:", error);
+        res.status(500).json({ error: "Erro interno do servidor." });
+    }
+});
+
+// Rota para Atualizar Perfil do Administrador (Configurações)
+app.put("/api/auth/admin/profile", async (req, res) => {
+    const { name, email, password } = req.body;
+    if (!req.lojaId) return res.status(400).json({ error: "Loja não identificada." });
+    
+    try {
+        // Busca o admin atual na tabela nova
+        const adminEmployee = await prisma.employee.findFirst({ 
+            where: { lojaId: req.lojaId, role: { in: ["ADMIN", "Administrador", "Gerente Master"] } } 
+        });
+
+        if (adminEmployee) {
+            const updateData = { name, email };
+            if (password && password.trim() !== "") {
+                updateData.password = await bcrypt.hash(password, 10);
+            }
+            await prisma.employee.update({ where: { id: adminEmployee.id }, data: updateData });
+            return res.json({ success: true });
+        }
+
+        // Busca o admin na tabela antiga (fallback)
+        const adminUser = await prisma.user.findFirst({ 
+            where: { lojaId: req.lojaId, role: { in: ["ADMIN", "Administrador", "Gerente Master"] } } 
+        });
+        
+        if (adminUser) {
+            const updateData = { name, email };
+            if (password && password.trim() !== "") {
+                updateData.password = await bcrypt.hash(password, 10);
+            }
+            await prisma.user.update({ where: { id: adminUser.id }, data: updateData });
+            return res.json({ success: true });
+        }
+
+        return res.status(404).json({ error: "Conta de administrador não encontrada." });
+    } catch (e) {
+        console.error("ERRO PUT ADMIN PROFILE:", e);
+        if (e.code === 'P2002') return res.status(400).json({ error: "E-mail já está em uso." });
+        res.status(500).json({ error: "Erro interno ao atualizar perfil." });
+    }
+});
+
+// ==============================================================
 // 4. CONFIGURAÇÕES, IMPRESSORAS E MÓDULOS DE CADASTRO GERAL
 // ==============================================================
 
