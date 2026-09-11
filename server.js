@@ -749,8 +749,14 @@ app.delete("/api/product-groups/:id", async (req, res) => {
 
 app.get("/api/settings", async (req, res) => {
     const isOpen = await checkStoreStatus(req.lojaId);
-    res.json({ ...(await getSettings(req.lojaId)), isOpen });
+    res.json({ 
+        ...(await getSettings(req.lojaId)), 
+        isOpen,
+        success: true,
+        store: req.lojaInfo
+    });
 });
+
 app.put("/api/settings", async (req, res) => {
     try {
         const currentSettings = await getSettings(req.lojaId);
