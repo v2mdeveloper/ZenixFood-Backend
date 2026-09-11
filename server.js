@@ -33,11 +33,11 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
 
 // ==============================================================
-// 1. MIDDLEWARE DE SAAS (MULTI-TENANT)
+// 1. MIDDLEWARE DE SAAS (MULTI-TENANT) E TRAVA DE INADIMPLÊNCIA
 // ==============================================================
 app.use(async (req, res, next) => {
     if (req.path.startsWith("/api/master")) return next();
-    if (req.path === "/api/webhook") return next(); // Webhooks não têm lojaId
+    if (req.path === "/api/webhook") return next();
 
     const lojaSlug = req.headers["x-loja-slug"];
     const lojaIdHeader = req.headers["x-loja-id"];
@@ -46,26 +46,23 @@ app.use(async (req, res, next) => {
         let loja = null;
 
         if (lojaIdHeader) {
-            loja = await prisma.loja.findUnique({
-                where: { id: lojaIdHeader },
-            });
+            loja = await prisma.loja.findUnique({ where: { id: lojaIdHeader } });
         } else if (lojaSlug) {
             loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
         }
 
         if (!loja && req.path !== "/api/master/lojas") {
-            // Fallback para desenvolvimento local: pega a primeira loja
             loja = await prisma.loja.findFirst();
-            if (!loja)
-                return res
-                    .status(403)
-                    .json({
-                        error:
-                            "SaaS: Nenhuma loja vinculada ou encontrada. Crie uma loja no Master.",
-                    });
+            if (!loja) return res.status(403).json({ error: "SaaS: Nenhuma loja vinculada." });
         }
 
         if (loja) {
+            // TRAVA DE SEGURANÇA: Se a loja foi bloqueada no Master, derruba as requisições com Erro 402
+            // Exceção: Permite apenas bater na rota store-info para que o Admin consiga baixar o boleto
+            if ((loja.status === 'BLOCKED' || loja.isActive === false) && !req.path.includes('/api/admin/store-info')) {
+                return res.status(402).json({ error: "Acesso bloqueado por pendências financeiras." });
+            }
+
             req.lojaId = loja.id;
             req.lojaInfo = loja;
         }
@@ -299,7 +296,7 @@ async function checkEmployeeAccountRules(
 
 
 // ==============================================================
-// 3. ROTAS MASTER (ZENIXFOOD)
+// ROTAS MASTER (ZENIXFOOD)
 // ==============================================================
 app.get("/api/master/lojas", async (req, res) => {
     try {
@@ -439,7 +436,7 @@ app.put("/api/master/lojas/:id", async (req, res) => {
 });
 
 // ==============================================================
-// 3. ROTAS DE AUTENTICAÇÃO E PERFIL DO ADMINISTRADOR
+// ROTAS DE AUTENTICAÇÃO E PERFIL DO ADMINISTRADOR
 // ==============================================================
 
 // Rota de Login do Administrador
@@ -632,6 +629,28 @@ app.get('/api/admin/store-info', async (req, res) => {
   } catch (error) {
     console.error('ERRO GET STORE INFO:', error);
     res.status(500).json({ success: false, error: 'Erro interno no servidor ao buscar dados da empresa.' });
+  }
+});
+
+// ==============================================================
+// BLOQUEAR / DESBLOQUEAR LOJA (SaaS)
+// ==============================================================
+app.put('/api/master/lojas/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    // Atualiza o status novo (ACTIVE/BLOCKED) e sincroniza com o isActive antigo para não quebrar nada
+    const isActive = status === 'ACTIVE';
+
+    const lojaAtualizada = await prisma.loja.update({
+      where: { id: req.params.id },
+      data: { status, isActive }
+    });
+
+    res.json({ success: true, loja: lojaAtualizada });
+  } catch (error) {
+    console.error('ERRO AO ALTERAR STATUS DA LOJA:', error);
+    res.status(500).json({ success: false, error: 'Erro interno ao tentar bloquear/desbloquear a loja.' });
   }
 });
 
