@@ -38,8 +38,8 @@ const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
 app.use(async (req, res, next) => {
     if (req.path.startsWith("/api/master")) return next();
     if (req.path === "/api/webhook") return next();
-    
-    // 🎯 LIBERA O TOTEM: Deixa as requisições públicas passarem direto
+
+    // LIBERA O TOTEM: Deixa as requisições públicas passarem direto sem barrar
     if (req.path.includes("/public/")) return next();
 
     const lojaSlug = req.headers["x-loja-slug"] || req.headers["x-store-id"];
@@ -51,24 +51,23 @@ app.use(async (req, res, next) => {
         if (lojaIdHeader) {
             loja = await prisma.loja.findUnique({ where: { id: lojaIdHeader } });
         } else if (lojaSlug) {
-            // Tenta achar pelo slug OU pelo ID 
             loja = await prisma.loja.findFirst({
                 where: { OR: [{ slug: lojaSlug }, { id: lojaSlug }] }
             });
             if (!loja) return res.status(404).json({ success: false, error: "Loja não encontrada." });
         }
 
-        // Fallback para desenvolvimento local
         if (!loja && !lojaSlug && !lojaIdHeader && req.path !== "/api/master/lojas") {
             loja = await prisma.loja.findFirst();
             if (!loja) return res.status(403).json({ error: "SaaS: Nenhuma loja vinculada no banco." });
         }
 
         if (loja) {
-            // TRAVA DE SEGURANÇA (Redireciona inadimplentes)
+            // Trava do Master
             if ((loja.status === 'BLOCKED' || loja.isActive === false) && !req.path.includes('/api/admin/store-info')) {
                 return res.status(402).json({ error: "Acesso bloqueado por pendências financeiras." });
             }
+
             req.lojaId = loja.id;
             req.lojaInfo = loja;
         }
@@ -81,7 +80,63 @@ app.use(async (req, res, next) => {
 });
 
 // ==============================================================
-// 2. FUNÇÕES AUXILIARES ISOLADAS POR LOJA
+// 2.ROTAS PÚBLICAS (TOTEM E CARDÁPIOS EXTERNOS)
+// logo abaixo do Middleware para não dar Erro 404!
+// ==============================================================
+app.get("/api/settings/public/:slug", async (req, res) => {
+    try {
+        const loja = await prisma.loja.findFirst({ where: { slug: req.params.slug } });
+        if (!loja) return res.status(404).json({ success: false, error: "Loja não encontrada." });
+        
+        if (loja.status === 'BLOCKED' || loja.isActive === false) return res.status(402).json({ error: "Acesso bloqueado." });
+        
+        const isOpen = await checkStoreStatus(loja.id);
+        res.json({ ...(await getSettings(loja.id)), isOpen, success: true, store: loja });
+    } catch (e) { res.status(500).json({ error: "Erro interno." }); }
+});
+
+app.get("/api/menu/public/:slug", async (req, res) => {
+    try {
+        const loja = await prisma.loja.findFirst({ where: { slug: req.params.slug } });
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada." });
+
+        if (loja.status === 'BLOCKED' || loja.isActive === false) return res.status(402).json({ error: "Acesso bloqueado." });
+
+        const menu = await prisma.category.findMany({
+            where: { lojaId: loja.id },
+            orderBy: { order: "asc" },
+            include: {
+                products: { where: { isActive: true }, orderBy: { order: "asc" } },
+            },
+        });
+        res.json(menu);
+    } catch (e) { res.status(500).json({ error: "Erro ao carregar cardápio." }); }
+});
+
+app.get("/api/products/highlights/public/:slug", async (req, res) => {
+    try {
+        const loja = await prisma.loja.findFirst({ where: { slug: req.params.slug } });
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada." });
+        
+        const highlights = await prisma.product.findMany({
+            where: { lojaId: loja.id, isFeatured: true, isActive: true },
+            take: 5,
+        });
+        res.json(highlights);
+    } catch (e) { res.status(500).json({ error: "Erro ao buscar destaques." }); }
+});
+
+app.get("/api/upsells/public/:slug", async (req, res) => {
+    try {
+        const loja = await prisma.loja.findFirst({ where: { slug: req.params.slug } });
+        if (!loja) return res.status(404).json([]);
+        const ups = await getUpsells(loja.id);
+        res.json(ups.filter(u => u.active));
+    } catch (e) { res.status(500).json([]); }
+});
+
+// ==============================================================
+// FUNÇÕES AUXILIARES ISOLADAS POR LOJA
 // ==============================================================
 
 async function getSettings(lojaId) {
