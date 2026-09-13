@@ -858,16 +858,22 @@ app.post(
         }
     }
 );
-app.delete("/api/fiscal/certificado", async (req, res) => {
+app.delete('/api/fiscal/certificado', async (req, res) => {
     try {
-        await prisma.systemConfig.delete({
-            where: {
-                key_lojaId: { key: "certificado_a1", lojaId: req.lojaId },
-            },
+        if (!req.lojaId) return res.status(400).json({ error: 'Loja não identificada.' });
+
+        await prisma.loja.update({
+            where: { id: req.lojaId },
+            data: { 
+                certificadoPfx: null, 
+                certificadoSenha: null 
+            }
         });
-        res.json({ success: true });
+
+        res.json({ success: true, message: 'Certificado removido com sucesso.' });
     } catch (error) {
-        res.json({ success: true });
+        console.error('ERRO AO EXCLUIR CERTIFICADO:', error);
+        res.status(500).json({ error: 'Erro interno ao tentar remover o certificado.' });
     }
 });
 
