@@ -2397,51 +2397,74 @@ app.post("/api/estoque/xml/preview", upload.single("xml"), async (req, res) => {
 
 app.post("/api/estoque/xml/import", async (req, res) => {
     try {
+        if (!req.lojaId) return res.status(400).json({ error: 'Loja não identificada.' });
+
         const { chaveNfe, items } = req.body;
-        let insumosAtualizados = 0;
+
+        // 🎯 TRAVA DE SEGURANÇA: Verifica se a NFe já foi importada
+        const notaJaImportada = await prisma.movimentacaoEstoque.findFirst({
+            where: { lojaId: req.lojaId, xmlRef: chaveNfe }
+        });
+
+        if (notaJaImportada) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "❌ Nota Fiscal Recusada: Esta NFe já deu entrada no estoque anteriormente!" 
+            });
+        }
+
+        // Processa os itens e atualiza o estoque
         for (const item of items) {
-            if (item.action === "IGNORE") continue;
+            if (item.action === 'IGNORE') continue;
+
             let insumoId = item.mappedInsumoId;
-            if (item.action === "NEW") {
-                const novo = await prisma.insumo.create({
+
+            // Se for criar um NOVO insumo
+            if (item.action === 'NEW') {
+                const novoInsumo = await prisma.insumo.create({
                     data: {
                         lojaId: req.lojaId,
                         name: item.name,
                         unit: item.unit,
-                        stock: item.quantity,
-                        cost: item.unitCost,
-                    },
+                        cost: Number(item.unitCost),
+                        stock: Number(item.quantity)
+                    }
                 });
-                insumoId = novo.id;
-            } else if (item.action === "LINK" && insumoId) {
-                await prisma.insumo.update({
-                    where: { id: insumoId },
-                    data: {
-                        stock: { increment: item.quantity },
-                        cost: item.unitCost,
-                    },
-                });
+                insumoId = novoInsumo.id;
+            } else if (item.action === 'LINK' && insumoId) {
+                // Atualiza insumo existente (soma estoque e atualiza custo)
+                const insumoAtual = await prisma.insumo.findUnique({ where: { id: insumoId } });
+                if (insumoAtual) {
+                    await prisma.insumo.update({
+                        where: { id: insumoId },
+                        data: {
+                            stock: Number(insumoAtual.stock) + Number(item.quantity),
+                            cost: Number(item.unitCost) // Atualiza para o custo mais recente da nota
+                        }
+                    });
+                }
             }
+
+            // Registra a movimentação atrelando a chave da NFe
             if (insumoId) {
                 await prisma.movimentacaoEstoque.create({
                     data: {
                         lojaId: req.lojaId,
                         insumoId: insumoId,
-                        type: "IN",
-                        quantity: item.quantity,
-                        reason: "Entrada via XML",
-                        xmlRef: chaveNfe,
-                    },
+                        type: 'IN',
+                        quantity: Number(item.quantity),
+                        reason: 'Entrada via XML',
+                        xmlRef: chaveNfe
+                    }
                 });
-                insumosAtualizados++;
             }
         }
-        res.json({
-            success: true,
-            message: `${insumosAtualizados} insumos processados!`,
-        });
+
+        res.json({ success: true, message: "✅ Estoque atualizado com sucesso!" });
+
     } catch (error) {
-        res.status(500).json({ error: "Erro" });
+        console.error("ERRO AO IMPORTAR XML:", error);
+        res.status(500).json({ success: false, error: "Erro interno ao processar a importação." });
     }
 });
 
