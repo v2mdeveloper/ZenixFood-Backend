@@ -199,6 +199,8 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                 client: true 
             }
         });
+        
+        processarBaixaDeEstoqueInteligente(newOrder.id, loja.id);
 
         res.status(201).json({ success: true, order: newOrder });
     } catch (error) {
@@ -2211,6 +2213,110 @@ async function recalcularCustoProduto(productId) {
             data: { costPrice: novoCusto },
         });
     } catch (err) {}
+}
+
+// ==============================================================
+// MOTOR INTELIGENTE DE BAIXA DE ESTOQUE (PIZZAS, COMBOS E NORMAIS)
+// ==============================================================
+async function processarBaixaDeEstoqueInteligente(orderId, lojaId) {
+    try {
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            include: { 
+                items: { 
+                    include: { 
+                        product: { 
+                            include: { 
+                                fichasTecnicas: true, 
+                                comboItemsAsParent: { include: { product: { include: { fichasTecnicas: true } } } } 
+                            } 
+                        } 
+                    } 
+                } 
+            }
+        });
+
+        if (!order) return;
+
+        for (const item of order.items) {
+            const prod = item.product;
+
+            // 1. É UM COMBO? (Baixa em Cascata)
+            if (prod.isCombo && prod.comboItemsAsParent) {
+                for (const comboItem of prod.comboItemsAsParent) {
+                    const subProduct = comboItem.product;
+                    const totalSubItensMultiplicado = item.quantity * comboItem.quantity;
+                    
+                    // Baixa a ficha técnica de cada subproduto do combo
+                    for (const ficha of subProduct.fichasTecnicas) {
+                        await abaterInsumo(lojaId, ficha.insumoId, ficha.quantity * totalSubItensMultiplicado, order.shortId);
+                    }
+                }
+            } 
+            // 2. É UMA PIZZA MULTI-SABORES? (Baixa Proporcional Fracionada)
+            else if (prod.isPizza && item.flavors) {
+                const sabores = typeof item.flavors === 'string' ? JSON.parse(item.flavors) : item.flavors;
+                const proporcao = 1 / sabores.length; // Ex: 2 sabores = 0.5 (50%), 3 sabores = 0.333 (33.3%)
+                const multiplicadorTamanho = prod.sizeMultiplier || 1.0;
+
+                for (const sabor of sabores) {
+                    // Busca a ficha técnica específica do sabor escolhido
+                    const saborProd = await prisma.product.findUnique({ 
+                        where: { id: sabor.productId }, 
+                        include: { fichasTecnicas: true }
+                    });
+                    
+                    if (saborProd) {
+                        for (const ficha of saborProd.fichasTecnicas) {
+                            // Cálculo com Extrema Precisão: Qtd Base * Proporção (Metade/Terço) * Tamanho da Pizza * Qtd de Pizzas Pedidas
+                            const qtdCalculada = ficha.quantity * proporcao * multiplicadorTamanho * item.quantity;
+                            await abaterInsumo(lojaId, ficha.insumoId, qtdCalculada, order.shortId);
+                        }
+                    }
+                }
+            }
+            // 3. PRODUTO NORMAL
+            else {
+                for (const ficha of prod.fichasTecnicas) {
+                    await abaterInsumo(lojaId, ficha.insumoId, ficha.quantity * item.quantity, order.shortId);
+                }
+            }
+
+            // 4. ADICIONAIS / BORDAS RECHEADAS
+            if (item.addons) {
+                 const addons = typeof item.addons === 'string' ? JSON.parse(item.addons) : item.addons;
+                 for (const addon of addons) {
+                     if (addon.insumoId) {
+                         await abaterInsumo(lojaId, addon.insumoId, addon.quantity * item.quantity, order.shortId);
+                     }
+                 }
+            }
+        }
+        console.log(`✅ Baixa de estoque inteligente concluída para o pedido #${order.shortId}`);
+    } catch (error) {
+        console.error("❌ Erro no Motor de Estoque:", error);
+    }
+}
+
+// Helper para executar a subtração com segurança
+async function abaterInsumo(lojaId, insumoId, quantidadeParaAbater, orderShortId) {
+    if (quantidadeParaAbater <= 0) return;
+    
+    await prisma.insumo.update({
+        where: { id: insumoId },
+        data: { stock: { decrement: quantidadeParaAbater } }
+    });
+
+    // Registra no extrato de movimentações
+    await prisma.movimentacaoEstoque.create({
+        data: {
+            lojaId: lojaId,
+            insumoId: insumoId,
+            type: 'OUT',
+            quantity: quantidadeParaAbater,
+            reason: `Venda Automática (Pedido #${orderShortId})`
+        }
+    });
 }
 
 app.get("/api/products/:id/fichas", async (req, res) => {

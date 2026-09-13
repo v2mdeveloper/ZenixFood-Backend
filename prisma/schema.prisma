@@ -8,7 +8,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// 🚨 ZENIXFOOD: TABELA MASTER QUE CONTROLA TODAS AS LOJAS (SaaS)
+//ZENIXFOOD: TABELA MASTER QUE CONTROLA TODAS AS LOJAS (SaaS)
 model Loja {
   id                 String    @id @default(uuid())
   slug               String    @unique // Ex: "burgerking" (usado para gerar burgerking.zenixfood.com.br)
@@ -45,7 +45,7 @@ model Loja {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  // 🚨 RELACIONAMENTOS: Tudo no sistema agora "pertence" a uma loja.
+  // RELACIONAMENTOS: Tudo no sistema agora "pertence" a uma loja.
   // O "Cascade" garante que, se você excluir a loja, todos os dados dela são apagados juntos.
   usuarios           User[]
   customerMovements  CustomerAccountMovement[]
@@ -53,6 +53,7 @@ model Loja {
   categorias         Category[]
   produtos           Product[]
   productGroups      ProductGroup[]
+  comboItems         ComboItem[] // Adicionado relacionamento para Combos
   orders             Order[]
   orderItems         OrderItem[]
   systemConfigs      SystemConfig[]
@@ -91,7 +92,7 @@ enum OrderStatus {
   CANCELED
 }
 
-// 🚨 ZENIXFOOD: TABELAS ADAPTADAS COM lojaId
+//ZENIXFOOD: TABELAS ADAPTADAS COM lojaId
 model User {
   id               String          @id @default(uuid())
   lojaId           String
@@ -159,31 +160,57 @@ model Category {
 }
 
 model Product {
-  id            String         @id @default(uuid())
-  lojaId        String
-  loja          Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  name          String
-  description   String?
-  price         Decimal        @db.Decimal(10, 2)
-  price700g     Decimal?       @db.Decimal(10, 2)
-  price1kg      Decimal?       @db.Decimal(10, 2)
-  costPrice     Float          @default(0)
-  imageUrl      String?
-  isActive      Boolean        @default(true)
-  isFeatured    Boolean        @default(false)
-  categoryId    String
-  order         Int            @default(0)
-  category      Category       @relation(fields: [categoryId], references: [id])
-  items         OrderItem[]
-  tabItems      TabItem[]      
-  ncm           String?  
-  ean           String?  
-  regraFiscalId String?  
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  fichasTecnicas FichaTecnica[]
-  groupId   String?
-  group     ProductGroup? @relation(fields: [groupId], references: [id])
+  id              String         @id @default(uuid())
+  lojaId          String
+  loja            Loja           @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  price           Decimal        @db.Decimal(10, 2)
+  price700g       Decimal?       @db.Decimal(10, 2)
+  price1kg        Decimal?       @db.Decimal(10, 2)
+  costPrice       Float          @default(0)
+  imageUrl        String?
+  isActive        Boolean        @default(true)
+  isFeatured      Boolean        @default(false)
+  categoryId      String
+  order           Int            @default(0)
+  category        Category       @relation(fields: [categoryId], references: [id])
+  
+  //Configurações de Pizza e Combo
+  isPizza         Boolean        @default(false)
+  maxFlavors      Int            @default(1)
+  pricingStrategy String         @default("HIGHEST") // "HIGHEST" (Maior valor) ou "AVERAGE" (Média)
+  sizeMultiplier  Float          @default(1.0)       // Multiplicador de estoque (Ex: Família = 1.3x)
+  isCombo         Boolean        @default(false)
+
+  //Árvore de Combos
+  comboItemsAsParent ComboItem[]   @relation("ComboParent")
+  comboItemsAsChild  ComboItem[]   @relation("ComboChild")
+
+  items           OrderItem[]
+  tabItems        TabItem[]      
+  ncm             String?  
+  ean             String?  
+  regraFiscalId   String?  
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  fichasTecnicas  FichaTecnica[]
+  groupId         String?
+  group           ProductGroup?  @relation(fields: [groupId], references: [id])
+}
+
+// Estrutura dos Combos Aninhados
+model ComboItem {
+  id        String  @id @default(uuid())
+  lojaId    String
+  loja      Loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  comboId   String
+  combo     Product @relation("ComboParent", fields: [comboId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation("ComboChild", fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int     @default(1)
+
+  @@unique([comboId, productId])
 }
 
 model ProductGroup {
@@ -233,6 +260,11 @@ model OrderItem {
   loja      Loja    @relation(fields: [lojaId], references: [id], onDelete: Cascade)
   quantity  Int
   price     Decimal
+  
+  //Configuração do item na venda (Sabores e Bordas/Adicionais)
+  flavors   Json?   // Guarda os sabores escolhidos [{ id: "123", name: "Calabresa" }]
+  addons    Json?   // Guarda os adicionais ou bordas [{ insumoId: "123", quantity: 1, name: "Borda Catupiry" }]
+
   orderId   String
   order     Order   @relation(fields: [orderId], references: [id])
   productId String
