@@ -189,6 +189,7 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                     create: items.map(item => ({
                         quantity: item.quantity,
                         price: Number(item.price),
+                        flavors: item.flavors ? item.flavors : undefined,
                         product: { connect: { id: item.productId } }, // Relacionamento explícito
                         loja: { connect: { id: loja.id } }            // Relacionamento explícito
                     }))
@@ -199,7 +200,7 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                 client: true 
             }
         });
-        
+
         processarBaixaDeEstoqueInteligente(newOrder.id, loja.id);
 
         res.status(201).json({ success: true, order: newOrder });
