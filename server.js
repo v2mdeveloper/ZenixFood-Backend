@@ -164,12 +164,15 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                 shortId,
                 total: Number(total),
                 status: 'PREPARING', 
-                paymentMethod: paymentMethod || 'No Caixa',
-                origin: 'TOTEM',
+                paymentMethod: paymentMethod || 'CASH',
+                
+                //Sintaxe exata do Prisma para criar o cliente junto com o pedido
                 client: {
-                    name: customerName || 'Cliente Totem',
-                    isTotem: true
+                    create: {
+                        name: customerName || 'Cliente Totem'
+                    }
                 },
+                
                 items: {
                     create: items.map(item => ({
                         productId: item.productId,
@@ -179,15 +182,19 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                     }))
                 }
             },
-            include: { items: { include: { product: true } } }
+            include: { 
+                items: { include: { product: true } },
+                client: true 
+            }
         });
 
         res.status(201).json({ success: true, order: newOrder });
     } catch (error) {
         console.error("ERRO AO CRIAR PEDIDO DO TOTEM:", error);
-        res.status(500).json({ error: "Erro interno ao processar o pedido." });
+        res.status(500).json({ error: "Erro interno ao processar o pedido.", details: error.message });
     }
 });
+
 
 // ==============================================================
 // FUNÇÕES AUXILIARES ISOLADAS POR LOJA
