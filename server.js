@@ -149,40 +149,48 @@ app.post("/api/orders/public/:slug", async (req, res) => {
 
         const { customerName, paymentMethod, items, total } = req.body;
 
+        //A Senha (shortId) TEM que ser um Número Inteiro (Int)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const count = await prisma.order.count({
+            where: { lojaId: loja.id, createdAt: { gte: today } }
+        });
+        const shortIdInt = count + 1; // Ex: 1, 2, 3... (O banco recusa o texto "001")
+
         let safePayment = 'CASH';
         if (paymentMethod === 'PIX') safePayment = 'PIX_ONLINE';
         else if (paymentMethod === 'CREDIT_CARD') safePayment = 'CREDIT_CARD_DELIVERY'; 
 
-        // E-MAIL FAKE ÚNICO PARA PASSAR NA VALIDAÇÃO OBRIGATÓRIA DA TABELA USER
         const uniqueEmail = `totem_${Date.now()}@zenixfood.com.br`;
 
         const newOrder = await prisma.order.create({
             data: {
-                lojaId: loja.id,
+                shortId: shortIdInt,           
                 total: Number(total),
                 status: 'PREPARING', 
                 paymentMethod: safePayment,
-                address: 'Retirada no Balcão (Totem)', // 🎯 OBRIGATÓRIO NO SCHEMA
+                address: 'Retirada no Balcão (Totem)',
                 origin: 'TOTEM',
                 
-                //CRIA O CLIENTE PREENCHENDO TODOS OS CAMPOS OBRIGATÓRIOS DO SCHEMA
+                // Relacionamento explícito com a Loja
+                loja: { connect: { id: loja.id } },
+                
                 client: {
                     create: {
-                        lojaId: loja.id,
                         name: customerName || 'Cliente Totem',
-                        email: uniqueEmail, 
-                        password: 'senha_totem', 
-                        phone: '00000000000'
+                        email: uniqueEmail,
+                        password: 'senha_totem',
+                        phone: '00000000000',
+                        loja: { connect: { id: loja.id } } // Relacionamento explícito
                     }
                 },
                 
-                //CRIA OS ITENS PREENCHENDO O lojaId OBRIGATÓRIO
                 items: {
                     create: items.map(item => ({
-                        lojaId: loja.id, 
-                        productId: item.productId,
                         quantity: item.quantity,
-                        price: Number(item.price)
+                        price: Number(item.price),
+                        product: { connect: { id: item.productId } }, // Relacionamento explícito
+                        loja: { connect: { id: loja.id } }            // Relacionamento explícito
                     }))
                 }
             },
@@ -195,7 +203,16 @@ app.post("/api/orders/public/:slug", async (req, res) => {
         res.status(201).json({ success: true, order: newOrder });
     } catch (error) {
         console.error("ERRO PRISMA TOTEM:", error);
-        res.status(500).json({ error: "Erro interno do Prisma", details: error.message });
+        
+        //Remove o lixo visual e mostra SÓ a causa real do erro na tela do Totem
+        let rawMessage = error.message || String(error);
+        let lines = rawMessage.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        let exactReason = lines[lines.length - 1] || "Erro desconhecido do banco.";
+
+        res.status(500).json({ 
+            error: "Erro do Prisma", 
+            details: exactReason 
+        });
     }
 });
 
