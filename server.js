@@ -136,6 +136,60 @@ app.get("/api/upsells/public/:slug", async (req, res) => {
 });
 
 // ==============================================================
+// RECEBER PEDIDO DO TOTEM (PÚBLICO)
+// ==============================================================
+app.post("/api/orders/public/:slug", async (req, res) => {
+    try {
+        const loja = await prisma.loja.findFirst({ where: { slug: req.params.slug } });
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada." });
+
+        if (loja.status === 'BLOCKED' || loja.isActive === false) {
+            return res.status(402).json({ error: "Loja bloqueada." });
+        }
+
+        const { customerName, paymentMethod, items, total } = req.body;
+
+        // 1. Gera o Número da Senha (shortId) zerando todo dia
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const count = await prisma.order.count({
+            where: { lojaId: loja.id, createdAt: { gte: today } }
+        });
+        const shortId = String(count + 1).padStart(3, '0');
+
+        // 2. Cria o pedido já com Status PREPARING para cair no KDS da Cozinha na hora!
+        const newOrder = await prisma.order.create({
+            data: {
+                lojaId: loja.id,
+                shortId,
+                total: Number(total),
+                status: 'PREPARING', 
+                paymentMethod: paymentMethod || 'No Caixa',
+                origin: 'TOTEM',
+                client: {
+                    name: customerName || 'Cliente Totem',
+                    isTotem: true
+                },
+                items: {
+                    create: items.map(item => ({
+                        productId: item.productId,
+                        quantity: item.quantity,
+                        price: Number(item.price),
+                        notes: item.notes || ''
+                    }))
+                }
+            },
+            include: { items: { include: { product: true } } }
+        });
+
+        res.status(201).json({ success: true, order: newOrder });
+    } catch (error) {
+        console.error("ERRO AO CRIAR PEDIDO DO TOTEM:", error);
+        res.status(500).json({ error: "Erro interno ao processar o pedido." });
+    }
+});
+
+// ==============================================================
 // FUNÇÕES AUXILIARES ISOLADAS POR LOJA
 // ==============================================================
 
