@@ -149,7 +149,7 @@ app.post("/api/orders/public/:slug", async (req, res) => {
 
         const { customerName, paymentMethod, items, total } = req.body;
 
-        // 1. Gera o Número da Senha (shortId) zerando todo dia
+        // 1. Gera a Senha (shortId) zerando diariamente
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const count = await prisma.order.count({
@@ -157,28 +157,38 @@ app.post("/api/orders/public/:slug", async (req, res) => {
         });
         const shortId = String(count + 1).padStart(3, '0');
 
-        // 2. Cria o pedido já com Status PREPARING para cair no KDS da Cozinha na hora!
+        //Tradução automática do Enum de Pagamento para não travar o banco
+        let safePayment = 'CASH';
+        if (paymentMethod === 'PIX') safePayment = 'PIX_ONLINE';
+        else if (paymentMethod === 'CREDIT_CARD') safePayment = 'CREDIT_CARD_DELIVERY'; 
+        else if (paymentMethod) safePayment = paymentMethod;
+
+        //garantindo o envio do lojaId
         const newOrder = await prisma.order.create({
             data: {
                 lojaId: loja.id,
                 shortId,
                 total: Number(total),
                 status: 'PREPARING', 
-                paymentMethod: paymentMethod || 'CASH',
+                paymentMethod: safePayment,
                 
-                //Sintaxe exata do Prisma para criar o cliente junto com o pedido
+                // Cria o cliente vinculando-o à loja corretamente
                 client: {
                     create: {
-                        name: customerName || 'Cliente Totem'
+                        name: customerName || 'Cliente Totem',
+                        lojaId: loja.id,       // Obrigatório para o banco não rejeitar
+                        phone: '00000000000'   // Prevenção caso o telefone seja campo obrigatório
                     }
                 },
                 
+                // Salva os itens vinculando-os à loja
                 items: {
                     create: items.map(item => ({
                         productId: item.productId,
                         quantity: item.quantity,
                         price: Number(item.price),
-                        notes: item.notes || ''
+                        notes: item.notes || '',
+                        lojaId: loja.id // Segurança extra
                     }))
                 }
             },
@@ -194,7 +204,6 @@ app.post("/api/orders/public/:slug", async (req, res) => {
         res.status(500).json({ error: "Erro interno ao processar o pedido.", details: error.message });
     }
 });
-
 
 // ==============================================================
 // FUNÇÕES AUXILIARES ISOLADAS POR LOJA
