@@ -1979,6 +1979,9 @@ app.get("/api/menu", async (req, res) => {
                     products: {
                         where: { isActive: true },
                         orderBy: { order: "asc" },
+                        include: { 
+                            comboItemsAsParent: true 
+                        }
                     },
                 },
             })
@@ -2039,6 +2042,7 @@ app.get("/api/products", async (req, res) => {
                 include: {
                     category: true,
                     fichasTecnicas: { include: { insumo: true } },
+                    comboItemsAsParent: true // 👈 Essencial para carregar os itens ao clicar em "Editar"
                 },
                 orderBy: { createdAt: "desc" },
             })
@@ -2050,18 +2054,10 @@ app.get("/api/products", async (req, res) => {
 
 app.post("/api/products", async (req, res) => {
     const {
-        name,
-        description,
-        price,
-        price700g,
-        price1kg,
-        categoryId,
-        imageUrl,
-        regraFiscalId,
-        ncm,
-        ean,
-        groupId,
+        name, description, price, price700g, price1kg, categoryId, imageUrl, regraFiscalId, ncm, ean, groupId,
+        isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems // 👈 Capturando as novidades da tela
     } = req.body;
+
     try {
         const newProduct = await prisma.product.create({
             data: {
@@ -2078,11 +2074,28 @@ app.post("/api/products", async (req, res) => {
                 ean,
                 groupId: groupId || null,
                 isActive: true,
+                
+                // 🍕 Salvando configs de Pizza
+                isPizza: Boolean(isPizza),
+                maxFlavors: maxFlavors ? Number(maxFlavors) : 1,
+                pricingStrategy: pricingStrategy || "HIGHEST",
+                sizeMultiplier: sizeMultiplier ? Number(sizeMultiplier) : 1.0,
+                
+                // 🍔 Salvando configs de Combo
+                isCombo: Boolean(isCombo),
+                comboItemsAsParent: (isCombo && comboItems && comboItems.length > 0) ? {
+                    create: comboItems.map(item => ({
+                        productId: item.productId,
+                        quantity: Number(item.quantity),
+                        lojaId: req.lojaId
+                    }))
+                } : undefined
             },
         });
         res.status(201).json({ success: true, product: newProduct });
     } catch (e) {
-        res.status(500).json({ error: "Erro" });
+        console.error("Erro ao criar produto:", e);
+        res.status(500).json({ error: "Erro ao salvar o produto no banco de dados." });
     }
 });
 
@@ -2127,17 +2140,52 @@ app.put("/api/products/:id", async (req, res) => {
     }
 });
 
-app.put("/api/products/:id/feature", async (req, res) => {
+app.put("/api/products/:id", async (req, res) => {
+    const {
+        name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId,
+        isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems // 👈 Capturando as novidades
+    } = req.body;
+
     try {
-        res.json({
-            success: true,
-            product: await prisma.product.update({
-                where: { id: req.params.id },
-                data: { isFeatured: req.body.isFeatured },
-            }),
+        const updated = await prisma.product.update({
+            where: { id: req.params.id },
+            data: {
+                name,
+                description,
+                price: Number(price),
+                price700g: price700g ? Number(price700g) : null,
+                price1kg: price1kg ? Number(price1kg) : null,
+                categoryId,
+                isActive,
+                imageUrl,
+                isFeatured,
+                regraFiscalId,
+                ncm,
+                ean,
+                groupId: groupId || null,
+                
+                // 🍕 Atualizando configs de Pizza
+                isPizza: Boolean(isPizza),
+                maxFlavors: maxFlavors ? Number(maxFlavors) : 1,
+                pricingStrategy: pricingStrategy || "HIGHEST",
+                sizeMultiplier: sizeMultiplier ? Number(sizeMultiplier) : 1.0,
+                
+                // 🍔 Atualizando configs de Combo
+                isCombo: Boolean(isCombo),
+                comboItemsAsParent: {
+                    deleteMany: {}, // 🧹 Primeiro limpa a lista antiga do pacote
+                    create: (isCombo && comboItems && comboItems.length > 0) ? comboItems.map(item => ({
+                        productId: item.productId,
+                        quantity: Number(item.quantity),
+                        lojaId: req.lojaId
+                    })) : [] // ✨ Depois recria com as edições atuais da tela
+                }
+            },
         });
+        res.json({ success: true, product: updated });
     } catch (e) {
-        res.status(500).json({ error: "Erro" });
+        console.error("Erro ao atualizar produto:", e);
+        res.status(500).json({ error: "Erro ao atualizar produto no banco de dados." });
     }
 });
 
