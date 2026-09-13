@@ -826,10 +826,7 @@ app.get("/api/fiscal/certificado/status", async (req, res) => {
         res.status(500).json({ error: "Erro" });
     }
 });
-app.post(
-    "/api/fiscal/certificado",
-    upload.single("certificado"),
-    async (req, res) => {
+app.post("/api/fiscal/certificado", upload.single("certificado"), async (req, res) => {
         try {
             const file = req.file;
             const senha = req.body.senha;
@@ -862,17 +859,25 @@ app.delete('/api/fiscal/certificado', async (req, res) => {
     try {
         if (!req.lojaId) return res.status(400).json({ error: 'Loja não identificada.' });
 
-        await prisma.loja.update({
-            where: { id: req.lojaId },
-            data: { 
-                certificadoPfx: null, 
-                certificadoSenha: null 
+        //Apaga o certificado da tabela SystemConfig usando a chave correta
+        await prisma.systemConfig.delete({
+            where: { 
+                key_lojaId: { 
+                    key: "certificado_a1", 
+                    lojaId: req.lojaId 
+                } 
             }
         });
 
         res.json({ success: true, message: 'Certificado removido com sucesso.' });
     } catch (error) {
         console.error('ERRO AO EXCLUIR CERTIFICADO:', error);
+        
+        // Se o Prisma disser que o arquivo já não existe (Erro P2025), retorna sucesso para destravar a tela
+        if (error.code === 'P2025') {
+            return res.json({ success: true, message: 'Certificado já havia sido removido.' });
+        }
+        
         res.status(500).json({ error: 'Erro interno ao tentar remover o certificado.' });
     }
 });
