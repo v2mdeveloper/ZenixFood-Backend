@@ -2453,18 +2453,12 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
         if (!req.lojaId) return res.status(400).json({ error: 'Loja não identificada.' });
 
         const dadosRelatorio = req.body; 
-
-        // Tenta puxar a chave da IA (Google Gemini) configurada no ambiente
         const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
         if (!GEMINI_API_KEY) {
-            // Resposta de fallback (segurança) caso você ainda não tenha colocado a chave
-            const textoSimulado = `🤖 **Conselheiro IA ZenixFood**\n\nAviso: A chave de inteligência artificial ainda não foi configurada no seu servidor.\n\nPara que eu analise seus produtos reais, crie uma chave gratuita no Google AI Studio (Gemini) e adicione a variável "GEMINI_API_KEY" no painel do seu backend (Render).`;
-            
-            return res.json({ success: true, analise: textoSimulado, message: textoSimulado, text: textoSimulado });
+            return res.json({ success: true, analise: "Aviso: A chave GEMINI_API_KEY não foi encontrada no Render." });
         }
 
-        // Chamada real para a Inteligência Artificial (usando Fetch nativo, sem precisar instalar bibliotecas)
         const prompt = `Você é um consultor financeiro especialista em restaurantes. Analise os seguintes dados financeiros e de estoque (CMV, Custos, Lucros) e dê 3 conselhos diretos, curtos e práticos para melhorar a margem de lucro. \n\nDados do restaurante: ${JSON.stringify(dadosRelatorio).substring(0, 1500)}`;
 
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
@@ -2474,9 +2468,17 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
         });
 
         const aiData = await response.json();
-        const textoResposta = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "Erro ao processar dados com a IA.";
 
-        res.json({ success: true, analise: textoResposta, message: textoResposta, text: textoResposta });
+        // Se o Google rejeitar, devolvemos o motivo EXATO para a tela do painel!
+        if (!response.ok) {
+            const erroGoogle = aiData.error?.message || "Erro desconhecido na API do Google";
+            console.error("ERRO DETALHADO DO GOOGLE:", aiData);
+            return res.json({ success: true, analise: `O Google recusou a conexão.\n\nMotivo exato: ${erroGoogle}` });
+        }
+
+        const textoResposta = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "A IA não retornou um texto válido.";
+
+        res.json({ success: true, analise: textoResposta });
 
     } catch (error) {
         console.error("ERRO NO CONSELHEIRO IA:", error);
