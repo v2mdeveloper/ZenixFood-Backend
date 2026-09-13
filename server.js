@@ -2459,25 +2459,58 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
             return res.json({ success: true, analise: "Aviso: A chave GEMINI_API_KEY não foi encontrada no Render." });
         }
 
+        // Busca e filtra os modelos dinamicamente (igual à rota de receitas)
+        const modelsRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+        );
+        const modelsData = await modelsRes.json();
+        const validModels = modelsData.models
+            .filter(
+                (m) =>
+                    m.supportedGenerationMethods?.includes("generateContent") &&
+                    m.name.includes("gemini")
+            )
+            .sort((a, b) => b.name.localeCompare(a.name));
+
         const prompt = `Você é um consultor financeiro especialista em restaurantes. Analise os seguintes dados financeiros e de estoque (CMV, Custos, Lucros) e dê 3 conselhos diretos, curtos e práticos para melhorar a margem de lucro. \n\nDados do restaurante: ${JSON.stringify(dadosRelatorio).substring(0, 1500)}`;
 
-        const model = { name: "models/gemini-1.5-flash" }; 
+        const payload = {
+            contents: [
+                {
+                    parts: [
+                        {
+                            text: prompt,
+                        },
+                    ],
+                },
+            ],
+        };
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${apiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
+        let textoResposta = null;
 
-        const aiData = await response.json();
-
-        if (!response.ok) {
-            const erroGoogle = aiData.error?.message || "Erro desconhecido na API do Google";
-            console.error("ERRO DETALHADO DO GOOGLE:", aiData);
-            return res.json({ success: true, analise: `O Google recusou a conexão.\n\nMotivo exato: ${erroGoogle}` });
+        // Loop nos modelos disponíveis para garantir que um vai funcionar
+        for (const model of validModels.slice(0, 5)) {
+            const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${apiKey}`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                }
+            );
+            const data = await response.json();
+            
+            if (data.error) continue; // Se esse modelo der erro, tenta o próximo
+            
+            if (data.candidates && data.candidates.length > 0) {
+                textoResposta = data.candidates[0].content.parts[0].text;
+                break; // Se deu certo, salva a resposta e sai do loop
+            }
         }
 
-        const textoResposta = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || "A IA não retornou um texto válido.";
+        if (!textoResposta) {
+            return res.json({ success: true, analise: "O Google recusou a conexão para todos os modelos tentados ou a resposta estava vazia." });
+        }
 
         res.json({ success: true, analise: textoResposta });
 
