@@ -149,7 +149,6 @@ app.post("/api/orders/public/:slug", async (req, res) => {
 
         const { customerName, paymentMethod, items, total } = req.body;
 
-        // 1. Gera a Senha (shortId) zerando diariamente
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const count = await prisma.order.count({
@@ -157,13 +156,13 @@ app.post("/api/orders/public/:slug", async (req, res) => {
         });
         const shortId = String(count + 1).padStart(3, '0');
 
-        //Tradução automática do Enum de Pagamento para não travar o banco
         let safePayment = 'CASH';
         if (paymentMethod === 'PIX') safePayment = 'PIX_ONLINE';
         else if (paymentMethod === 'CREDIT_CARD') safePayment = 'CREDIT_CARD_DELIVERY'; 
-        else if (paymentMethod) safePayment = paymentMethod;
 
-        //garantindo o envio do lojaId
+        // Número de telefone aleatório para não travar a regra de "telefone único" do banco
+        const uniquePhone = "TTM" + Math.floor(Math.random() * 10000000).toString();
+
         const newOrder = await prisma.order.create({
             data: {
                 lojaId: loja.id,
@@ -172,23 +171,21 @@ app.post("/api/orders/public/:slug", async (req, res) => {
                 status: 'PREPARING', 
                 paymentMethod: safePayment,
                 
-                // Cria o cliente vinculando-o à loja corretamente
                 client: {
                     create: {
                         name: customerName || 'Cliente Totem',
-                        lojaId: loja.id,       // Obrigatório para o banco não rejeitar
-                        phone: '00000000000'   // Prevenção caso o telefone seja campo obrigatório
+                        phone: uniquePhone,
+                        lojaId: loja.id
                     }
                 },
                 
-                // Salva os itens vinculando-os à loja
+                //itens pertencem apenas ao pedido!
                 items: {
                     create: items.map(item => ({
                         productId: item.productId,
                         quantity: item.quantity,
                         price: Number(item.price),
-                        notes: item.notes || '',
-                        lojaId: loja.id // Segurança extra
+                        notes: item.notes || ''
                     }))
                 }
             },
@@ -200,8 +197,12 @@ app.post("/api/orders/public/:slug", async (req, res) => {
 
         res.status(201).json({ success: true, order: newOrder });
     } catch (error) {
-        console.error("ERRO AO CRIAR PEDIDO DO TOTEM:", error);
-        res.status(500).json({ error: "Erro interno ao processar o pedido.", details: error.message });
+        console.error("ERRO PRISMA TOTEM:", error);
+        //erro exato do banco de dados!
+        res.status(500).json({ 
+            error: "Erro interno do Prisma", 
+            details: error.message 
+        });
     }
 });
 
