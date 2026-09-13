@@ -2453,15 +2453,17 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
         if (!req.lojaId) return res.status(400).json({ error: 'Loja não identificada.' });
 
         const dadosRelatorio = req.body; 
-        const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+        const apiKey = process.env.GEMINI_API_KEY;
 
-        if (!GEMINI_API_KEY) {
+        if (!apiKey) {
             return res.json({ success: true, analise: "Aviso: A chave GEMINI_API_KEY não foi encontrada no Render." });
         }
 
         const prompt = `Você é um consultor financeiro especialista em restaurantes. Analise os seguintes dados financeiros e de estoque (CMV, Custos, Lucros) e dê 3 conselhos diretos, curtos e práticos para melhorar a margem de lucro. \n\nDados do restaurante: ${JSON.stringify(dadosRelatorio).substring(0, 1500)}`;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        const model = { name: "models/gemini-1.5-flash" }; 
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model.name}:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -2469,7 +2471,6 @@ app.post("/api/ai/analise-lucros", async (req, res) => {
 
         const aiData = await response.json();
 
-        // Se o Google rejeitar, devolvemos o motivo EXATO para a tela do painel!
         if (!response.ok) {
             const erroGoogle = aiData.error?.message || "Erro desconhecido na API do Google";
             console.error("ERRO DETALHADO DO GOOGLE:", aiData);
