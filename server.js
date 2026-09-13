@@ -2143,10 +2143,27 @@ app.put("/api/products/:id", async (req, res) => {
 app.put("/api/products/:id", async (req, res) => {
     const {
         name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId,
-        isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems // 👈 Capturando as novidades
+        isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems
     } = req.body;
 
     try {
+        // LIMPEZA SEGURA: Apaga os itens antigos do combo deste produto diretamente no banco
+        // Isso evita que o banco dê erro de "duplicação" ao tentar salvar os mesmos itens editados.
+        await prisma.comboItem.deleteMany({
+            where: { comboId: req.params.id }
+        });
+
+        // Monta os novos itens do combo (se ele for um combo)
+        let novosItensCombo = [];
+        if (isCombo && comboItems && comboItems.length > 0) {
+            novosItensCombo = comboItems.map(item => ({
+                productId: item.productId,
+                quantity: Number(item.quantity),
+                lojaId: req.lojaId
+            }));
+        }
+
+        //Salva o produto com os dados novos da Pizza e Combo
         const updated = await prisma.product.update({
             where: { id: req.params.id },
             data: {
@@ -2164,24 +2181,20 @@ app.put("/api/products/:id", async (req, res) => {
                 ean,
                 groupId: groupId || null,
                 
-                // 🍕 Atualizando configs de Pizza
+                // Salvando as edições da Pizza
                 isPizza: Boolean(isPizza),
                 maxFlavors: maxFlavors ? Number(maxFlavors) : 1,
                 pricingStrategy: pricingStrategy || "HIGHEST",
                 sizeMultiplier: sizeMultiplier ? Number(sizeMultiplier) : 1.0,
                 
-                // 🍔 Atualizando configs de Combo
+                // Salvando as edições do Combo
                 isCombo: Boolean(isCombo),
-                comboItemsAsParent: {
-                    deleteMany: {}, // 🧹 Primeiro limpa a lista antiga do pacote
-                    create: (isCombo && comboItems && comboItems.length > 0) ? comboItems.map(item => ({
-                        productId: item.productId,
-                        quantity: Number(item.quantity),
-                        lojaId: req.lojaId
-                    })) : [] // ✨ Depois recria com as edições atuais da tela
-                }
+                comboItemsAsParent: novosItensCombo.length > 0 ? {
+                    create: novosItensCombo
+                } : undefined
             },
         });
+
         res.json({ success: true, product: updated });
     } catch (e) {
         console.error("Erro ao atualizar produto:", e);
