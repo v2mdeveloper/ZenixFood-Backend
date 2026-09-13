@@ -149,43 +149,40 @@ app.post("/api/orders/public/:slug", async (req, res) => {
 
         const { customerName, paymentMethod, items, total } = req.body;
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const count = await prisma.order.count({
-            where: { lojaId: loja.id, createdAt: { gte: today } }
-        });
-        const shortId = String(count + 1).padStart(3, '0');
-
         let safePayment = 'CASH';
         if (paymentMethod === 'PIX') safePayment = 'PIX_ONLINE';
         else if (paymentMethod === 'CREDIT_CARD') safePayment = 'CREDIT_CARD_DELIVERY'; 
 
-        // Número de telefone aleatório para não travar a regra de "telefone único" do banco
-        const uniquePhone = "TTM" + Math.floor(Math.random() * 10000000).toString();
+        // E-MAIL FAKE ÚNICO PARA PASSAR NA VALIDAÇÃO OBRIGATÓRIA DA TABELA USER
+        const uniqueEmail = `totem_${Date.now()}@zenixfood.com.br`;
 
         const newOrder = await prisma.order.create({
             data: {
                 lojaId: loja.id,
-                shortId,
                 total: Number(total),
                 status: 'PREPARING', 
                 paymentMethod: safePayment,
+                address: 'Retirada no Balcão (Totem)', // 🎯 OBRIGATÓRIO NO SCHEMA
+                origin: 'TOTEM',
                 
+                //CRIA O CLIENTE PREENCHENDO TODOS OS CAMPOS OBRIGATÓRIOS DO SCHEMA
                 client: {
                     create: {
+                        lojaId: loja.id,
                         name: customerName || 'Cliente Totem',
-                        phone: uniquePhone,
-                        lojaId: loja.id
+                        email: uniqueEmail, 
+                        password: 'senha_totem', 
+                        phone: '00000000000'
                     }
                 },
                 
-                //itens pertencem apenas ao pedido!
+                //CRIA OS ITENS PREENCHENDO O lojaId OBRIGATÓRIO
                 items: {
                     create: items.map(item => ({
+                        lojaId: loja.id, 
                         productId: item.productId,
                         quantity: item.quantity,
-                        price: Number(item.price),
-                        notes: item.notes || ''
+                        price: Number(item.price)
                     }))
                 }
             },
@@ -198,11 +195,7 @@ app.post("/api/orders/public/:slug", async (req, res) => {
         res.status(201).json({ success: true, order: newOrder });
     } catch (error) {
         console.error("ERRO PRISMA TOTEM:", error);
-        //erro exato do banco de dados!
-        res.status(500).json({ 
-            error: "Erro interno do Prisma", 
-            details: error.message 
-        });
+        res.status(500).json({ error: "Erro interno do Prisma", details: error.message });
     }
 });
 
