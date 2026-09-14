@@ -2100,47 +2100,6 @@ app.post("/api/products", async (req, res) => {
 });
 
 app.put("/api/products/:id", async (req, res) => {
-    const {
-        name,
-        description,
-        price,
-        price700g,
-        price1kg,
-        categoryId,
-        isActive,
-        imageUrl,
-        isFeatured,
-        regraFiscalId,
-        ncm,
-        ean,
-        groupId,
-    } = req.body;
-    try {
-        const updated = await prisma.product.update({
-            where: { id: req.params.id },
-            data: {
-                name,
-                description,
-                price: Number(price),
-                price700g: price700g ? Number(price700g) : null,
-                price1kg: price1kg ? Number(price1kg) : null,
-                categoryId,
-                isActive,
-                imageUrl,
-                isFeatured,
-                regraFiscalId,
-                ncm,
-                ean,
-                groupId: groupId || null,
-            },
-        });
-        res.json({ success: true, product: updated });
-    } catch (e) {
-        res.status(500).json({ error: "Erro ao atualizar produto" });
-    }
-});
-
-app.put("/api/products/:id", async (req, res) => {
     try {
         const {
             name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId,
