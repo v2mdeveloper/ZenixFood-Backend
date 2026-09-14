@@ -3593,6 +3593,7 @@ app.post("/api/orders", async (req, res) => {
         waiter,
         managerAuth,
     } = req.body;
+    
     let finalDiscount = Number(pdvDiscount) || 0;
     let finalTotalCart = Number(total);
     let finalOrigin = origin || "APP";
@@ -3793,6 +3794,18 @@ app.post("/api/orders", async (req, res) => {
 
         let txOps = [];
 
+        // 🎯 FUNÇÃO HELPER PARA MAPEAR OS ITENS CORRETAMENTE COM SABORES E COMBOS
+        const mapItemForDB = (item) => ({
+            lojaId: req.lojaId,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            name: item.name || null,
+            flavors: item.flavors ? (typeof item.flavors === 'string' ? item.flavors : JSON.stringify(item.flavors)) : null,
+            comboItems: item.comboItems ? (typeof item.comboItems === 'string' ? item.comboItems : JSON.stringify(item.comboItems)) : null,
+            observation: item.observation || null,
+        });
+
         if (normalItems.length > 0 && scheduledItems.length > 0) {
             const scheduledTotal = scheduledItems.reduce(
                 (acc, i) => acc + Number(i.price) * i.quantity,
@@ -3821,12 +3834,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: normalItems.map((item) => ({
-                                lojaId: req.lojaId,
-                                productId: item.productId,
-                                quantity: item.quantity,
-                                price: item.price,
-                            })),
+                            create: normalItems.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
                         },
                     },
                     include: { client: true },
@@ -3848,12 +3856,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: scheduledItems.map((item) => ({
-                                lojaId: req.lojaId,
-                                productId: item.productId,
-                                quantity: item.quantity,
-                                price: item.price,
-                            })),
+                            create: scheduledItems.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
                         },
                     },
                     include: { client: true },
@@ -3876,12 +3879,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: items.map((item) => ({
-                                lojaId: req.lojaId,
-                                productId: item.productId,
-                                quantity: item.quantity,
-                                price: item.price,
-                            })),
+                            create: items.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
                         },
                     },
                     include: { client: true },
