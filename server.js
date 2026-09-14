@@ -2141,53 +2141,58 @@ app.put("/api/products/:id", async (req, res) => {
 });
 
 app.put("/api/products/:id", async (req, res) => {
-    const {
-        name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId,
-        isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems
-    } = req.body;
-
     try {
-        // LIMPEZA SEGURA: Apaga os itens antigos do combo deste produto diretamente no banco
-        // Isso evita que o banco dê erro de "duplicação" ao tentar salvar os mesmos itens editados.
+        const {
+            name, description, price, price700g, price1kg, categoryId, isActive, imageUrl, isFeatured, regraFiscalId, ncm, ean, groupId,
+            isPizza, maxFlavors, pricingStrategy, sizeMultiplier, isCombo, comboItems
+        } = req.body;
+
+        // 1. LIMPEZA SEGURA: Apaga os itens antigos do combo para recriar sem erros de duplicação
         await prisma.comboItem.deleteMany({
             where: { comboId: req.params.id }
         });
 
-        // Monta os novos itens do combo (se ele for um combo)
+        // 2. FILTRA OS ITENS DO COMBO (Evita itens duplicados)
         let novosItensCombo = [];
         if (isCombo && comboItems && comboItems.length > 0) {
-            novosItensCombo = comboItems.map(item => ({
-                productId: item.productId,
-                quantity: Number(item.quantity),
-                lojaId: req.lojaId
-            }));
+            const seen = new Set();
+            for (const item of comboItems) {
+                if (!seen.has(item.productId)) {
+                    seen.add(item.productId);
+                    novosItensCombo.push({
+                        productId: item.productId,
+                        quantity: Number(item.quantity) || 1,
+                        lojaId: req.lojaId
+                    });
+                }
+            }
         }
 
-        //Salva o produto com os dados novos da Pizza e Combo
+        // 3. ATUALIZAÇÃO NO BANCO (Salvando explicitamente as configurações de Pizza e Combo)
         const updated = await prisma.product.update({
             where: { id: req.params.id },
             data: {
                 name,
-                description,
-                price: Number(price),
+                description: description || null,
+                price: Number(price) || 0,
                 price700g: price700g ? Number(price700g) : null,
                 price1kg: price1kg ? Number(price1kg) : null,
                 categoryId,
-                isActive,
-                imageUrl,
-                isFeatured,
-                regraFiscalId,
-                ncm,
-                ean,
+                isActive: Boolean(isActive),
+                imageUrl: imageUrl || null,
+                isFeatured: Boolean(isFeatured),
+                regraFiscalId: regraFiscalId || null,
+                ncm: ncm || null,
+                ean: ean || null,
                 groupId: groupId || null,
                 
-                // Salvando as edições da Pizza
+                // 🍕 Salvando as propriedades da Pizza
                 isPizza: Boolean(isPizza),
                 maxFlavors: maxFlavors ? Number(maxFlavors) : 1,
                 pricingStrategy: pricingStrategy || "HIGHEST",
-                sizeMultiplier: sizeMultiplier ? Number(sizeMultiplier) : 1.0,
+                sizeMultiplier: sizeMultiplier !== undefined ? Number(sizeMultiplier) : 1.0,
                 
-                // Salvando as edições do Combo
+                // 🍔 Salvando as propriedades e os sub-itens do Combo
                 isCombo: Boolean(isCombo),
                 comboItemsAsParent: novosItensCombo.length > 0 ? {
                     create: novosItensCombo
@@ -2197,11 +2202,12 @@ app.put("/api/products/:id", async (req, res) => {
 
         res.json({ success: true, product: updated });
     } catch (e) {
-        console.error("Erro ao atualizar produto:", e);
-        res.status(500).json({ error: "Erro ao atualizar produto no banco de dados." });
+        console.error("Erro ao atualizar produto no servidor:", e);
+        res.status(500).json({ success: false, error: "Erro ao atualizar produto no banco de dados: " + e.message });
     }
 });
 
+// CATEGORIAS
 app.post("/api/categories", async (req, res) => {
     try {
         const count = await prisma.category.count({
