@@ -3794,17 +3794,31 @@ app.post("/api/orders", async (req, res) => {
 
         let txOps = [];
 
-        // 🎯 FUNÇÃO HELPER PARA MAPEAR OS ITENS CORRETAMENTE COM SABORES E COMBOS
-        const mapItemForDB = (item) => ({
-            lojaId: req.lojaId,
-            productId: item.productId,
-            quantity: item.quantity,
-            price: item.price,
-            name: item.name || null,
-            flavors: item.flavors ? (typeof item.flavors === 'string' ? item.flavors : JSON.stringify(item.flavors)) : null,
-            comboItems: item.comboItems ? (typeof item.comboItems === 'string' ? item.comboItems : JSON.stringify(item.comboItems)) : null,
-            observation: item.observation || null,
-        });
+        // 🎯 MAPPER DINÂMICO SEGURO (Evita o erro de Nulo no Prisma e aceita customizações)
+        const mapItemForDB = (item) => {
+            const dbItem = {
+                lojaId: req.lojaId,
+                productId: item.productId || item.id, // Fallback se o cart usar "id" em vez de "productId"
+                quantity: item.quantity || 1,
+                price: Number(item.price) || 0,
+            };
+
+            // Anexa as propriedades EXTRAS APENAS se elas existirem no carrinho do cliente
+            if (item.name) dbItem.name = item.name;
+            if (item.observation) dbItem.observation = item.observation;
+            
+            // Busca sabores em "flavors" ou "sabores" (Front-ends diferentes podem usar nomes diferentes)
+            const flavorsData = item.flavors || item.sabores;
+            if (flavorsData) {
+                dbItem.flavors = typeof flavorsData === 'string' ? flavorsData : JSON.stringify(flavorsData);
+            }
+
+            if (item.comboItems) {
+                dbItem.comboItems = typeof item.comboItems === 'string' ? item.comboItems : JSON.stringify(item.comboItems);
+            }
+
+            return dbItem;
+        };
 
         if (normalItems.length > 0 && scheduledItems.length > 0) {
             const scheduledTotal = scheduledItems.reduce(
@@ -3834,7 +3848,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: normalItems.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
+                            create: normalItems.map(mapItemForDB),
                         },
                     },
                     include: { client: true },
@@ -3856,7 +3870,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: scheduledItems.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
+                            create: scheduledItems.map(mapItemForDB),
                         },
                     },
                     include: { client: true },
@@ -3879,7 +3893,7 @@ app.post("/api/orders", async (req, res) => {
                         shiftId: currentShiftId,
                         registerId: registerId || null,
                         items: {
-                            create: items.map(mapItemForDB), // 🍕 USANDO O HELPER COM SABORES
+                            create: items.map(mapItemForDB),
                         },
                     },
                     include: { client: true },
@@ -4027,7 +4041,9 @@ app.post("/api/orders", async (req, res) => {
             newBalance,
         });
     } catch (error) {
-        res.status(500).json({ error: "Erro ao processar o pedido" });
+        // 🔥 Console.error adicionado para registrar o motivo exato no log do Render
+        console.error("ERRO GRAVE NO CHECKOUT:", error);
+        res.status(500).json({ error: "Erro ao processar o pedido", details: error.message });
     }
 });
 
