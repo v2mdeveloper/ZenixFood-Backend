@@ -2021,6 +2021,29 @@ app.put("/api/products/reorder", async (req, res) => {
     }
 });
 
+//Rota exclusiva para adicionar/remover o produto do Carrossel (Destaque)
+app.put("/api/products/:id/feature", async (req, res) => {
+    try {
+        const { isFeatured } = req.body;
+        
+        // Atualiza apenas o campo isFeatured no banco de dados
+        const updatedProduct = await prisma.product.update({
+            where: { id: req.params.id },
+            data: { 
+                isFeatured: Boolean(isFeatured) 
+            },
+        });
+
+        res.json({ success: true, product: updatedProduct });
+    } catch (e) {
+        console.error("Erro ao alterar destaque do produto:", e);
+        res.status(500).json({ 
+            success: false, 
+            error: "Erro ao atualizar destaque no banco de dados: " + e.message 
+        });
+    }
+});
+
 app.get("/api/products/highlights", async (req, res) => {
     try {
         res.json(
