@@ -570,7 +570,7 @@ app.put('/api/super/users/:id/status', async (req, res) => {
 app.get("/api/master/lojas", async (req, res) => {
   try {
     // Busca todas as lojas e manda o Prisma INCLUIR os dados de quem é o dono (adminUser)
-    const stores = await prisma.store.findMany({
+    const stores = await prisma.loja.findMany({
       include: { 
         adminUser: {
           select: { id: true, name: true, email: true } // Traz o nome do franqueado para o Frontend!
