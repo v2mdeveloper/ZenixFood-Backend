@@ -842,17 +842,17 @@ app.get('/api/admin/store-info', async (req, res) => {
   }
 });
 
-// ==============================================================
-// BLOQUEAR / DESBLOQUEAR LOJA (SaaS)
-// ==============================================================
+// ============================================================================
+// BLOQUEAR / DESBLOQUEAR LOJA (Botão de Status na Tabela)
+// ============================================================================
 app.put('/api/master/lojas/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    
-    // Atualiza o status novo (ACTIVE/BLOCKED) e sincroniza com o isActive antigo para não quebrar nada
     const isActive = status === 'ACTIVE';
 
-    const lojaAtualizada = await prisma.loja.update({
+    const dbModel = prisma.loja || prisma.store;
+
+    const lojaAtualizada = await dbModel.update({
       where: { id: req.params.id },
       data: { status, isActive }
     });
@@ -861,6 +861,52 @@ app.put('/api/master/lojas/:id/status', async (req, res) => {
   } catch (error) {
     console.error('ERRO AO ALTERAR STATUS DA LOJA:', error);
     res.status(500).json({ success: false, error: 'Erro interno ao tentar bloquear/desbloquear a loja.' });
+  }
+});
+
+// ============================================================================
+// EDITAR DADOS DA LOJA E VINCULAR FRANQUEADO 
+// ============================================================================
+app.put('/api/master/lojas/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Suporte inteligente para o nome da tabela (Loja ou Store)
+    const dbModel = prisma.loja || prisma.store;
+    if (!dbModel) throw new Error("Tabela de Lojas não encontrada no Prisma.");
+
+    // Extraímos EXATAMENTE os campos que existem na tabela
+    const { 
+      slug, razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, 
+      emailEmpresa, telefoneEmpresa, nomeResponsavel, cpfResponsavel, 
+      emailResponsavel, endereco, logoUrl, plan, monthlyFee, adminUserId 
+    } = req.body;
+
+    const updatedLoja = await dbModel.update({
+      where: { id },
+      data: {
+        slug, 
+        razaoSocial, 
+        cnpj, 
+        inscricaoEstadual, 
+        inscricaoMunicipal, 
+        emailEmpresa, 
+        telefoneEmpresa, 
+        nomeResponsavel, 
+        cpfResponsavel, 
+        emailResponsavel, 
+        endereco, 
+        logoUrl, 
+        plan, 
+        monthlyFee: Number(monthlyFee || 0),
+        adminUserId: adminUserId || null // Se vier vazio, ele desvincula
+      }
+    });
+
+    res.json({ success: true, loja: updatedLoja });
+  } catch (error) {
+    console.error("🔥 ERRO AO EDITAR LOJA:", error);
+    res.status(500).json({ error: "Erro interno ao atualizar a loja.", details: error.message });
   }
 });
 
