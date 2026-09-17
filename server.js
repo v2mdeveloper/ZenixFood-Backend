@@ -909,14 +909,14 @@ app.put('/api/master/lojas/:id', async (req, res) => {
 
     res.json({ success: true, loja: updatedLoja });
   } catch (error) {
-    console.error("🔥 ERRO DETALHADO DO PRISMA:", error);
+    console.error("🔥 ERRO FATAL NA EDIÇÃO DA LOJA:", error);
     
-    // Devolve o erro técnico exato para a tela do usuário
+    // 🎯 Manda o erro cru (toString) e o código do Prisma direto para a tela
     res.status(500).json({ 
       success: false, 
-      error: error.message,
-      prismaCode: error.code,
-      meta: error.meta
+      error: error.toString(), 
+      prismaCode: error.code || 'SEM_CODIGO',
+      meta: error.meta ? JSON.stringify(error.meta) : ''
     });
   }
 });
