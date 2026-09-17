@@ -492,7 +492,7 @@ app.get('/api/super/users', async (req, res) => {
 // Buscar apenas as lojas (para preencher o select de vínculos)
 app.get('/api/super/stores', async (req, res) => {
   try {
-    const stores = await prisma.store.findMany({
+    const stores = await prisma.loja.findMany({
       select: { id: true, razaoSocial: true, slug: true, name: true }
     });
     res.json(stores);
