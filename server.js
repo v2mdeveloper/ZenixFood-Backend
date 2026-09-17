@@ -489,14 +489,21 @@ app.get('/api/super/users', async (req, res) => {
   }
 });
 
+
+// ============================================================================
 // Buscar apenas as lojas (para preencher o select de vínculos)
+// ============================================================================
 app.get('/api/super/stores', async (req, res) => {
   try {
-    const stores = await prisma.loja.findMany({
-      select: { id: true, razaoSocial: true, slug: true, name: true }
+    const dbModel = prisma.loja || prisma.store;
+    if (!dbModel) throw new Error("Tabela não encontrada");
+
+    const stores = await dbModel.findMany({
+      select: { id: true, razaoSocial: true, slug: true }
     });
     res.json(stores);
   } catch (error) {
+    console.error("Erro em /api/super/stores:", error);
     res.status(500).json({ error: 'Erro ao buscar lojas para vínculo.' });
   }
 });
