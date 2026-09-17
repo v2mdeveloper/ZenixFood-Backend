@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config();api/master
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -439,19 +439,150 @@ async function checkEmployeeAccountRules(
     return { success: true, employee: emp };
 }
 
+// ============================================================================
+// ROTAS DE AUTENTICAÇÃO (SaaS Master / Franqueados)
+// ============================================================================
+app.post('/api/master/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Procura o usuário Master no banco
+    const user = await prisma.adminUser.findUnique({ where: { email } });
+    if (!user) return res.status(401).json({ error: 'Usuário não encontrado.' });
+    if (!user.isActive) return res.status(403).json({ error: 'Usuário bloqueado por falta de pagamento ou infração.' });
 
+    // Verifica a senha criptografada
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Senha incorreta.' });
 
-// ==============================================================
-// ROTAS MASTER (ZENIXFOOD)
-// ==============================================================
-app.get("/api/master/lojas", async (req, res) => {
-    try {
-        res.json(
-            await prisma.loja.findMany({ orderBy: { createdAt: "desc" } })
-        );
-    } catch (e) {
-        res.status(500).json({ error: "Erro ao buscar lojas" });
+    // Gera o Token JWT
+    const token = jwt.sign(
+      { id: user.id, role: user.role }, 
+      process.env.JWT_SECRET || 'zenix_secret_key', 
+      { expiresIn: '7d' }
+    );
+    
+    res.json({ success: true, token, user: { id: user.id, name: user.name, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro interno no servidor ao tentar logar.' });
+  }
+});
+
+app.post('/api/master/auth/forgot-password', async (req, res) => {
+  
+  res.json({ success: true, message: 'Se o e-mail existir, as instruções foram enviadas.' });
+});
+
+// ============================================================================
+// ROTAS DO SUPER MASTER (Gestão de Franquias/Usuários)
+// ============================================================================
+// Buscar todos os usuários e as lojas que eles gerenciam
+app.get('/api/super/users', async (req, res) => {
+  try {
+    const users = await prisma.adminUser.findMany({
+      include: { managedStores: true },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar usuários do sistema.' });
+  }
+});
+
+// Buscar apenas as lojas (para preencher o select de vínculos)
+app.get('/api/super/stores', async (req, res) => {
+  try {
+    const stores = await prisma.store.findMany({
+      select: { id: true, razaoSocial: true, slug: true, name: true }
+    });
+    res.json(stores);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar lojas para vínculo.' });
+  }
+});
+
+// Criar novo usuário Master/Franqueado
+app.post('/api/super/users', async (req, res) => {
+  try {
+    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds } = req.body;
+    
+    // Criptografa a senha antes de salvar
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    const newUser = await prisma.adminUser.create({
+      data: {
+        name, cpf, email, password: hashedPassword, cep, address, neighborhood, city, uf, role,
+        managedStores: { connect: managedStoreIds.map(id => ({ id })) }
+      }
+    });
+    res.json({ success: true, user: newUser });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao criar usuário. O e-mail ou CPF já podem estar cadastrados.' });
+  }
+});
+
+// Editar usuário Master/Franqueado
+app.put('/api/super/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds } = req.body;
+    
+    let updateData = { name, cpf, email, cep, address, neighborhood, city, uf, role };
+    
+    // Só atualiza a senha se o Super Master tiver digitado uma nova
+    if (password && password.trim() !== '') {
+      updateData.password = await bcrypt.hash(password, 10);
     }
+
+    const updatedUser = await prisma.adminUser.update({
+      where: { id },
+      data: {
+        ...updateData,
+        managedStores: { set: managedStoreIds.map(storeId => ({ id: storeId })) } // Atualiza os vínculos
+      }
+    });
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao atualizar dados do usuário.' });
+  }
+});
+
+// Bloquear / Desbloquear Usuário Master
+app.put('/api/super/users/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+    const updatedUser = await prisma.adminUser.update({
+      where: { id },
+      data: { isActive }
+    });
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao alterar status do usuário.' });
+  }
+});
+
+// ============================================================================
+// 3. ATUALIZAÇÃO: BUSCA DE LOJAS COM O NOME DO FRANQUEADO
+// ============================================================================
+
+app.get("/api/master/lojas", async (req, res) => {
+  try {
+    // Busca todas as lojas e manda o Prisma INCLUIR os dados de quem é o dono (adminUser)
+    const stores = await prisma.store.findMany({
+      include: { 
+        adminUser: {
+          select: { id: true, name: true, email: true } // Traz o nome do franqueado para o Frontend!
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(stores);
+  } catch (error) {
+    console.error("Erro ao buscar lojas:", error);
+    res.status(500).json({ error: "Erro interno ao listar lojas." });
+  }
 });
 
 // Rota para criar uma nova loja (Master)
