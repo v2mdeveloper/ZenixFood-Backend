@@ -76,6 +76,8 @@ model Loja {
   tabItems           TabItem[]
   printers           Printer[]
   contasPagas        ContaPagar[]
+  adminUserId        String?
+  adminUser          AdminUser? @relation(fields: [adminUserId], references: [id])
 }
 
 enum Role {
@@ -90,6 +92,31 @@ enum OrderStatus {
   IN_TRANSIT
   DELIVERED
   CANCELED
+}
+
+model AdminUser {
+  id           String   @id @default(uuid())
+  name         String
+  cpf          String?  @unique
+  email        String   @unique
+  password     String
+  
+  // Endereço
+  cep          String?
+  address      String?
+  neighborhood String?
+  city         String?
+  uf           String?
+  
+  // Controle
+  isActive     Boolean  @default(true)
+  role         String   @default("MASTER") // Pode ser "SUPER_MASTER" ou "MASTER"
+  
+  // Relacionamento: Quais lojas este usuário gerencia?
+  managedStores Loja[]
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 //ZENIXFOOD: TABELAS ADAPTADAS COM lojaId
