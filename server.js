@@ -576,11 +576,13 @@ app.put('/api/super/users/:id/status', async (req, res) => {
 
 app.get("/api/master/lojas", async (req, res) => {
   try {
-    // Busca todas as lojas e manda o Prisma INCLUIR os dados de quem é o dono (adminUser)
-    const stores = await prisma.loja.findMany({
+    const dbModel = prisma.loja || prisma.store;
+    if (!dbModel) throw new Error("Tabela de Lojas não encontrada");
+
+    const stores = await dbModel.findMany({
       include: { 
         adminUser: {
-          select: { id: true, name: true, email: true } // Traz o nome do franqueado para o Frontend!
+          select: { id: true, name: true, email: true } 
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -662,7 +664,7 @@ app.put("/api/master/lojas/:id", async (req, res) => {
     }
 });
 
-// Rota de Login do Administrador
+
 // ==============================================================
 // LOGIN DO ADMINISTRADOR E FUNCIONÁRIOS NO PAINEL
 // ==============================================================
@@ -856,7 +858,6 @@ app.put('/api/master/lojas/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
     const isActive = status === 'ACTIVE';
-
     const dbModel = prisma.loja || prisma.store;
 
     const lojaAtualizada = await dbModel.update({
@@ -880,43 +881,44 @@ app.put('/api/master/lojas/:id', async (req, res) => {
     const dbModel = prisma.loja || prisma.store;
     if (!dbModel) throw new Error("Tabela de Lojas não encontrada no Prisma.");
 
-    const { 
-      slug, razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, 
-      emailEmpresa, telefoneEmpresa, nomeResponsavel, cpfResponsavel, 
-      emailResponsavel, endereco, logoUrl, plan, monthlyFee, adminUserId 
-    } = req.body;
+    const dataToUpdate = {};
+    const allowedFields = [
+      'slug', 'razaoSocial', 'cnpj', 'inscricaoEstadual', 'inscricaoMunicipal', 
+      'emailEmpresa', 'telefoneEmpresa', 'nomeResponsavel', 'cpfResponsavel', 
+      'emailResponsavel', 'endereco', 'logoUrl', 'plan'
+    ];
+
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        dataToUpdate[field] = req.body[field];
+      }
+    });
+
+    if (req.body.monthlyFee !== undefined) {
+      dataToUpdate.monthlyFee = Number(req.body.monthlyFee || 0);
+    }
+
+    if (req.body.senhaResponsavel && req.body.senhaResponsavel.trim() !== '') {
+      dataToUpdate.senhaResponsavel = req.body.senhaResponsavel;
+    }
+
+    if (req.body.adminUserId !== undefined) {
+      dataToUpdate.adminUserId = (req.body.adminUserId === '' || req.body.adminUserId === 'null' || !req.body.adminUserId) 
+        ? null 
+        : req.body.adminUserId;
+    }
 
     const updatedLoja = await dbModel.update({
       where: { id },
-      data: {
-        slug, 
-        razaoSocial, 
-        cnpj, 
-        inscricaoEstadual, 
-        inscricaoMunicipal, 
-        emailEmpresa, 
-        telefoneEmpresa, 
-        nomeResponsavel, 
-        cpfResponsavel, 
-        emailResponsavel, 
-        endereco, 
-        logoUrl, 
-        plan, 
-        monthlyFee: Number(monthlyFee || 0),
-        adminUserId: (adminUserId === '' || adminUserId === 'null' || !adminUserId) ? null : adminUserId
-      }
+      data: dataToUpdate
     });
 
     res.json({ success: true, loja: updatedLoja });
   } catch (error) {
-    console.error("🔥 ERRO FATAL NA EDIÇÃO DA LOJA:", error);
-    
-    // 🎯 Manda o erro cru (toString) e o código do Prisma direto para a tela
+    console.error("🔥 ERRO FATAL AO EDITAR LOJA:", error);
     res.status(500).json({ 
       success: false, 
-      error: error.toString(), 
-      prismaCode: error.code || 'SEM_CODIGO',
-      meta: error.meta ? JSON.stringify(error.meta) : ''
+      error: error.message || "Erro desconhecido no banco de dados" 
     });
   }
 });
