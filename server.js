@@ -882,6 +882,7 @@ app.put('/api/master/lojas/:id', async (req, res) => {
     if (!dbModel) throw new Error("Tabela de Lojas não encontrada no Prisma.");
 
     const dataToUpdate = {};
+    //'endereco' adicionado na lista de campos permitidos
     const allowedFields = [
       'slug', 'razaoSocial', 'cnpj', 'inscricaoEstadual', 'inscricaoMunicipal', 
       'emailEmpresa', 'telefoneEmpresa', 'nomeResponsavel', 'cpfResponsavel', 
