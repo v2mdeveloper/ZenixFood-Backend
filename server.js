@@ -880,47 +880,41 @@ app.put('/api/master/lojas/:id', async (req, res) => {
     const dbModel = prisma.loja || prisma.store;
     if (!dbModel) throw new Error("Tabela de Lojas não encontrada no Prisma.");
 
-    //Filtra APENAS os campos que existem no banco de dados
-    const dataToUpdate = {};
-    const allowedFields = [
-      'slug', 'razaoSocial', 'cnpj', 'inscricaoEstadual', 'inscricaoMunicipal', 
-      'emailEmpresa', 'telefoneEmpresa', 'nomeResponsavel', 'cpfResponsavel', 
-      'emailResponsavel', 'endereco', 'logoUrl', 'plan'
-    ];
+    const { 
+      slug, razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, 
+      emailEmpresa, telefoneEmpresa, nomeResponsavel, cpfResponsavel, 
+      emailResponsavel, endereco, logoUrl, plan, monthlyFee, adminUserId 
+    } = req.body;
 
-    allowedFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        dataToUpdate[field] = req.body[field];
-      }
-    });
-
-    // 💰 Tratamento especial para números
-    if (req.body.monthlyFee !== undefined) {
-      dataToUpdate.monthlyFee = Number(req.body.monthlyFee || 0);
-    }
-
-    // 👥 Tratamento do vínculo do Franqueado (Se for vazio, salva como null)
-    if (req.body.adminUserId !== undefined) {
-      dataToUpdate.adminUserId = (req.body.adminUserId === '' || req.body.adminUserId === 'null') 
-        ? null 
-        : req.body.adminUserId;
-    }
-
-    // Executa a atualização
     const updatedLoja = await dbModel.update({
       where: { id },
-      data: dataToUpdate
+      data: {
+        slug, 
+        razaoSocial, 
+        cnpj, 
+        inscricaoEstadual, 
+        inscricaoMunicipal, 
+        emailEmpresa, 
+        telefoneEmpresa, 
+        nomeResponsavel, 
+        cpfResponsavel, 
+        emailResponsavel, 
+        endereco, 
+        logoUrl, 
+        plan, 
+        monthlyFee: Number(monthlyFee || 0),
+        adminUserId: (adminUserId === '' || adminUserId === 'null' || !adminUserId) ? null : adminUserId
+      }
     });
 
     res.json({ success: true, loja: updatedLoja });
   } catch (error) {
     console.error("🔥 ERRO FATAL AO EDITAR LOJA:", error);
     
-    // Retorna o motivo EXATO do erro para o Frontend alertar na tela
+    // ISSO VAI MOSTRAR O ERRO REAL NA TELA EM VEZ DE SÓ "ERRO AO EDITAR"
     res.status(500).json({ 
-      success: false,
-      error: "Erro no banco de dados.", 
-      details: error.meta?.cause || error.message 
+      success: false, 
+      error: error.message || "Erro desconhecido no Prisma" 
     });
   }
 });
