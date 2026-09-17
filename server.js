@@ -909,12 +909,14 @@ app.put('/api/master/lojas/:id', async (req, res) => {
 
     res.json({ success: true, loja: updatedLoja });
   } catch (error) {
-    console.error("🔥 ERRO FATAL AO EDITAR LOJA:", error);
+    console.error("🔥 ERRO DETALHADO DO PRISMA:", error);
     
-    // ISSO VAI MOSTRAR O ERRO REAL NA TELA EM VEZ DE SÓ "ERRO AO EDITAR"
+    // Devolve o erro técnico exato para a tela do usuário
     res.status(500).json({ 
       success: false, 
-      error: error.message || "Erro desconhecido no Prisma" 
+      error: error.message,
+      prismaCode: error.code,
+      meta: error.meta
     });
   }
 });
