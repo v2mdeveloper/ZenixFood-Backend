@@ -652,17 +652,6 @@ app.post("/api/master/lojas", async (req, res) => {
     }
 });
 
-app.put("/api/master/lojas/:id", async (req, res) => {
-    try {
-        const updatedLoja = await prisma.loja.update({
-            where: { id: req.params.id },
-            data: req.body,
-        });
-        res.json({ success: true, loja: updatedLoja });
-    } catch (error) {
-        res.status(500).json({ error: "Erro ao editar Loja" });
-    }
-});
 
 
 // ==============================================================
