@@ -8,12 +8,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-//ZENIXFOOD: TABELA MASTER QUE CONTROLA TODAS AS LOJAS (SaaS)
 model Loja {
-  id                 String    @id @default(uuid())
-  slug               String    @unique // Ex: "burgerking" (usado para gerar burgerking.zenixfood.com.br)
+  id                 String   @id @default(uuid())
+  slug               String   @unique // Ex: "burgerking" (usado para gerar burgerking.zenixfood.com.br)
   razaoSocial        String
-  cnpj               String    @unique
+  cnpj               String   @unique
   inscricaoEstadual  String?
   inscricaoMunicipal String?
   endereco           String?
@@ -24,26 +23,35 @@ model Loja {
   // Dados do Responsável pela Loja (Dono)
   nomeResponsavel    String
   cpfResponsavel     String
-  emailResponsavel   String    @unique // Este será o e-mail de acesso master da loja
-  senhaResponsavel   String    // Senha de acesso
+  emailResponsavel   String   @unique // Este será o e-mail de acesso master da loja
+  senhaResponsavel   String   // Senha de acesso
   
   // Controle de Módulos SaaS (O que você vende para eles)
-  isActive           Boolean   @default(true)
-  modulosAtivos      Json      @default("[\"PDV\", \"KDS\", \"SALAO\"]") // Módulos que eles pagaram
+  isActive           Boolean  @default(true)
+  modulosAtivos      Json     @default("[\"PDV\", \"KDS\", \"SALAO\"]") // Módulos que eles pagaram
   dataVencimento     DateTime?
   
   // Personalização White-Label da Loja (Totem/Cardápio)
-  corPrincipal       String    @default("#F59E0B")
+  corPrincipal       String   @default("#F59E0B")
   logoUrl            String?
   cabecalhoHtml      String?
   rodapeHtml         String?
   
-  plan               String    @default("STANDARD")
-  monthlyFee         Float     @default(0.0)
-  status             String    @default("ACTIVE")
+  // PLANOS E FINANCEIRO (Atualizado para o novo sistema)
+  plan               String   @default("STANDARD") // Mantido por compatibilidade
+  monthlyFee         Float    @default(0.0) // Valor final cobrado do cliente (Plano + Suporte)
+  status             String   @default("ACTIVE")
+  
+  //Relacionamento com a Tabela de Planos Criados pelo Super Master
+  planoSaaSId        String?
+  planoSaaS          PlanoSaaS? @relation(fields: [planoSaaSId], references: [id])
+  
+  //Controle de Suporte Técnico do Franqueado
+  temSuporte         Boolean  @default(false)
+  valorSuporte       Float    @default(0.0) // Valor extra adicionado pelo Franqueado
 
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   // RELACIONAMENTOS: Tudo no sistema agora "pertence" a uma loja.
   // O "Cascade" garante que, se você excluir a loja, todos os dados dela são apagados juntos.
@@ -76,8 +84,32 @@ model Loja {
   tabItems           TabItem[]
   printers           Printer[]
   contasPagas        ContaPagar[]
+  
+  // Relacionamento com o Franqueado (Dono da Carteira)
   adminUserId        String?
   adminUser          AdminUser? @relation(fields: [adminUserId], references: [id])
+}
+
+// ============================================================================
+// Planos de Assinatura criados pelo Super Master
+// ============================================================================
+
+model PlanoSaaS {
+  id          String   @id @default(uuid())
+  nome        String   @unique // Ex: "Standard", "Premium"
+  precoBase   Float    @default(0.0) // Preço mínimo definido pelo Super Master (Franqueado não muda isso)
+  
+  // Quais módulos este plano libera no painel do restaurante?
+  // Ex: ["CARDAPIO", "PDV", "IMPRESSORAS", "KDS", "ESTOQUE", "FISCAL"]
+  modulosLiberados Json @default("[]") 
+  
+  isActive    Boolean  @default(true)
+  
+  // Relacionamento: Quais lojas assinaram este plano?
+  lojas       Loja[]   
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 enum Role {

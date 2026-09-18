@@ -861,8 +861,9 @@ app.put('/api/master/lojas/:id/status', async (req, res) => {
   }
 });
 
+
 // ============================================================================
-// EDITAR DADOS DA LOJA E VINCULAR FRANQUEADO 
+// EDITAR DADOS DA LOJA E VINCULAR FRANQUEADO / PLANOS
 // ============================================================================
 app.put('/api/master/lojas/:id', async (req, res) => {
   try {
@@ -871,11 +872,12 @@ app.put('/api/master/lojas/:id', async (req, res) => {
     if (!dbModel) throw new Error("Tabela de Lojas não encontrada no Prisma.");
 
     const dataToUpdate = {};
-    //'endereco' adicionado na lista de campos permitidos
+    
+    //inclui os campos do novo sistema de Planos
     const allowedFields = [
       'slug', 'razaoSocial', 'cnpj', 'inscricaoEstadual', 'inscricaoMunicipal', 
       'emailEmpresa', 'telefoneEmpresa', 'nomeResponsavel', 'cpfResponsavel', 
-      'emailResponsavel', 'endereco', 'logoUrl', 'plan'
+      'emailResponsavel', 'endereco', 'logoUrl', 'plan', 'planoSaaSId', 'temSuporte'
     ];
 
     allowedFields.forEach(field => {
@@ -886,6 +888,11 @@ app.put('/api/master/lojas/:id', async (req, res) => {
 
     if (req.body.monthlyFee !== undefined) {
       dataToUpdate.monthlyFee = Number(req.body.monthlyFee || 0);
+    }
+    
+    //Captura o valor extra do suporte técnico
+    if (req.body.valorSuporte !== undefined) {
+      dataToUpdate.valorSuporte = Number(req.body.valorSuporte || 0);
     }
 
     if (req.body.senhaResponsavel && req.body.senhaResponsavel.trim() !== '') {
@@ -5013,6 +5020,82 @@ app.get("/api/ai/receitas", async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: "Erro" });
     }
+});
+
+// ============================================================================
+// GERENCIAMENTO DE PLANOS SAAS (Apenas Super Master)
+// ============================================================================
+
+// 1. Listar todos os planos
+app.get('/api/super/planos', async (req, res) => {
+  try {
+    const planos = await prisma.planoSaaS.findMany({
+      orderBy: { precoBase: 'asc' }
+    });
+    res.json(planos);
+  } catch (error) {
+    console.error("Erro ao buscar planos:", error);
+    res.status(500).json({ error: "Erro interno ao listar planos." });
+  }
+});
+
+// 2. Criar novo plano
+app.post('/api/super/planos', async (req, res) => {
+  try {
+    const { nome, precoBase, modulosLiberados, isActive } = req.body;
+    
+    // Converte os módulos para JSON String caso venham como Array
+    const modulosStr = Array.isArray(modulosLiberados) ? JSON.stringify(modulosLiberados) : modulosLiberados;
+
+    const novoPlano = await prisma.planoSaaS.create({
+      data: {
+        nome,
+        precoBase: Number(precoBase || 0),
+        modulosLiberados: modulosStr || "[]",
+        isActive: isActive !== undefined ? isActive : true
+      }
+    });
+    res.json({ success: true, plano: novoPlano });
+  } catch (error) {
+    console.error("Erro ao criar plano:", error);
+    res.status(500).json({ error: "Erro ao criar plano." });
+  }
+});
+
+// 3. Editar plano existente
+app.put('/api/super/planos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, precoBase, modulosLiberados, isActive } = req.body;
+    
+    const modulosStr = Array.isArray(modulosLiberados) ? JSON.stringify(modulosLiberados) : modulosLiberados;
+
+    const planoAtualizado = await prisma.planoSaaS.update({
+      where: { id },
+      data: {
+        nome,
+        precoBase: Number(precoBase || 0),
+        modulosLiberados: modulosStr,
+        isActive
+      }
+    });
+    res.json({ success: true, plano: planoAtualizado });
+  } catch (error) {
+    console.error("Erro ao editar plano:", error);
+    res.status(500).json({ error: "Erro ao editar plano." });
+  }
+});
+
+// 4. Deletar plano
+app.delete('/api/super/planos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.planoSaaS.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Erro ao deletar plano:", error);
+    res.status(500).json({ error: "Erro ao deletar plano. Certifique-se de que não há lojas usando ele." });
+  }
 });
 
 const PORT = process.env.PORT || 3333;
