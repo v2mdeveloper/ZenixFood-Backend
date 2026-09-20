@@ -4309,23 +4309,38 @@ app.post("/api/webhook", async (req, res) => {
     }
 });
 
-// Outras listagens
-app.get("/api/orders", async (req, res) => {
-    try {
-        res.json(
-            await prisma.order.findMany({
-                where: { lojaId: req.lojaId },
-                include: {
-                    client: true,
-                    items: { include: { product: true } },
-                    deliveryPerson: { select: { name: true } },
-                },
-                orderBy: { createdAt: "desc" },
-            })
-        );
-    } catch (e) {
-        res.status(500).json({ error: "Erro" });
-    }
+
+// ============================================================================
+// ROTA DE RELATÓRIOS: Listar Todos os Pedidos (Admin)
+// ============================================================================
+app.get('/api/orders', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const orders = await prisma.order.findMany({
+      where: { lojaId: loja.id },
+      include: { 
+         client: true, 
+         items: { include: { product: true } },
+         tab: true 
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // Garante que o nome real da Comanda/Evento sobreponha o cliente genérico
+    const formatados = orders.map(o => ({
+       ...o,
+       customerName: o.tab?.customerName || o.customerName || o.client?.name || 'Cliente Avulso',
+       customerCpf: o.tab?.customerCpf || o.customerCpf || o.client?.cpf || null
+    }));
+
+    res.json(formatados);
+  } catch (error) {
+    console.error("Erro ao buscar pedidos:", error);
+    res.status(500).json({ error: "Erro ao buscar pedidos" });
+  }
 });
 
 app.get("/api/orders/client/:clientId", async (req, res) => {
