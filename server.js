@@ -5152,7 +5152,9 @@ app.post('/api/eventos', async (req, res) => {
   }
 });
 
-// 3. 🚀 A ROTA MÁGICA: Importar Planilha e Abrir Salão Automaticamente
+// ============================================================================
+// 3.Importar Planilha e Abrir Salão (VERSÃO BLINDADA)
+// ============================================================================
 app.post('/api/eventos/:id/importar', async (req, res) => {
   try {
     const { id } = req.params;
@@ -5170,81 +5172,101 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
     });
 
     if (!turnoAtual) {
-      return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto para importar as comandas!" });
+      return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto no salão para gerar as comandas!" });
     }
 
     let importadosCount = 0;
+    let errosCount = 0;
 
-    // Loop poderoso para processar cada linha da planilha
+    // Loop poderoso para processar cada linha da planilha com Try/Catch INDIVIDUAL
     for (const row of convidados) {
-      if (!row.nome) continue; // Pula se a linha não tiver nome
+      try {
+        if (!row.nome || row.nome.trim() === '') continue; // Pula linhas vazias
 
-      // 1. Cadastrar/Atualizar o Cliente no CRM do restaurante (Se tiver CPF ou Email)
-      let clienteSalvo = null;
-      if (row.cpf) {
-        clienteSalvo = await prisma.user.findFirst({
-          where: { cpf: row.cpf, lojaId: loja.id }
-        });
-      }
+        // 🛡️ LIMPEZA DE DADOS (Garante que o Prisma não trave com textos acidentais)
+        const cleanCpf = row.cpf ? String(row.cpf).replace(/\D/g, '') : null;
+        const comandaStr = row.comandaIndicada ? String(row.comandaIndicada).replace(/\D/g, '') : null;
+        const mesaStr = row.mesaIndicada ? String(row.mesaIndicada).replace(/\D/g, '') : null;
 
-      if (!clienteSalvo && row.cpf) {
-        // Cria o cliente se ele não existir
-        clienteSalvo = await prisma.user.create({
-          data: {
-            lojaId: loja.id,
-            name: row.nome,
-            cpf: row.cpf,
-            email: row.email || `${row.cpf}@cliente.com`, // Email fake caso não tenha
-            phone: row.telefone,
-            password: 'senha_padrao_evento', // Senha irrelevante para salão
-            role: 'CLIENT'
+        // 1. Cadastrar/Atualizar o Cliente no CRM do restaurante
+        let clienteSalvo = null;
+        if (cleanCpf && cleanCpf.length > 0) {
+          clienteSalvo = await prisma.user.findFirst({
+            where: { cpf: cleanCpf, lojaId: loja.id }
+          });
+
+          if (!clienteSalvo) {
+            // Cria o cliente se ele não existir
+            clienteSalvo = await prisma.user.create({
+              data: {
+                lojaId: loja.id,
+                name: row.nome,
+                cpf: cleanCpf,
+                email: row.email || `${cleanCpf}@cliente.com`, // Email fake de segurança
+                phone: row.telefone || null,
+                password: 'senha_padrao_evento',
+                role: 'CLIENT'
+              }
+            });
           }
-        });
-      }
-
-      // 2. Criar a Comanda/Mesa automaticamente no Salão (Se a planilha indicar)
-      let novaTab = null;
-      if (row.comandaIndicada) {
-        novaTab = await prisma.restaurantTab.create({
-          data: {
-            lojaId: loja.id,
-            number: Number(row.comandaIndicada),
-            type: 'TAB', // Comanda Individual
-            status: 'OPEN',
-            customerName: row.nome,
-            customerCpf: row.cpf || null,
-            linkedTable: row.mesaIndicada ? Number(row.mesaIndicada) : null,
-            seatLabel: row.posicaoMesa || 'Convidado VIP',
-            openedBy: 'Sistema (Recepção)',
-            shiftId: turnoAtual.id,
-            eventoId: evento.id
-          }
-        });
-      }
-
-      // 3. Vincular o convidado à lista do Evento e à Comanda criada
-      await prisma.eventoConvidado.create({
-        data: {
-          eventoId: evento.id,
-          nome: row.nome,
-          cpf: row.cpf || null,
-          email: row.email || null,
-          telefone: row.telefone || null,
-          mesaIndicada: row.mesaIndicada || null,
-          posicaoMesa: row.posicaoMesa || null,
-          comandaIndicada: row.comandaIndicada || null,
-          tabId: novaTab ? novaTab.id : null,
-          statusCheckIn: false // Ele ainda precisa chegar na porta e dar check-in
         }
-      });
 
-      importadosCount++;
+        // 2. Criar a Comanda/Mesa automaticamente no Salão
+        let novaTab = null;
+        if (comandaStr && comandaStr !== '') {
+          novaTab = await prisma.restaurantTab.create({
+            data: {
+              lojaId: loja.id,
+              number: Number(comandaStr), // Agora garantido que é apenas número
+              type: 'TAB', // Comanda Individual
+              status: 'OPEN',
+              customerName: row.nome,
+              customerCpf: cleanCpf,
+              linkedTable: mesaStr && mesaStr !== '' ? Number(mesaStr) : null,
+              seatLabel: row.posicaoMesa || 'Convidado VIP',
+              openedBy: 'Sistema (Recepção)',
+              shiftId: turnoAtual.id,
+              eventoId: evento.id
+            }
+          });
+        }
+
+        // 3. Vincular o convidado à lista do Evento
+        await prisma.eventoConvidado.create({
+          data: {
+            eventoId: evento.id,
+            nome: row.nome,
+            cpf: cleanCpf,
+            email: row.email || null,
+            telefone: row.telefone || null,
+            mesaIndicada: row.mesaIndicada || null, // Guarda o texto original para visualização
+            posicaoMesa: row.posicaoMesa || null,
+            comandaIndicada: row.comandaIndicada || null,
+            tabId: novaTab ? novaTab.id : null,
+            statusCheckIn: false 
+          }
+        });
+
+        importadosCount++;
+      } catch (rowError) {
+        // Se uma pessoa der erro (ex: CPF duplicado), loga o erro mas NÃO cancela o resto!
+        console.error(`🔥 Erro ao importar o convidado [${row.nome}]:`, rowError);
+        errosCount++;
+      }
     }
 
-    res.json({ success: true, message: `${importadosCount} convidados importados e comandas abertas com sucesso!` });
+    if (importadosCount === 0 && errosCount > 0) {
+      return res.status(500).json({ error: `Nenhum convidado foi importado. Ocorreram ${errosCount} erros nos dados da planilha.` });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `${importadosCount} convidados importados com sucesso! ${errosCount > 0 ? `(${errosCount} linhas ignoradas por erro)` : ''}` 
+    });
+
   } catch (error) {
-    console.error("Erro na importação:", error);
-    res.status(500).json({ error: "Erro interno ao processar a planilha." });
+    console.error("🔥 Erro fatal na importação:", error);
+    res.status(500).json({ error: "Erro interno fatal ao processar a planilha." });
   }
 });
 
