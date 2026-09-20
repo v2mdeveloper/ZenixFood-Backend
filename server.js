@@ -5196,19 +5196,32 @@ app.get('/api/eventos', async (req, res) => {
   }
 });
 
-// 2. Criar um Novo Evento
+// ============================================================================
+// 2. Criar um Novo Evento (COM BLOQUEIO RIGOROSO DE DATA)
+// ============================================================================
 app.post('/api/eventos', async (req, res) => {
   try {
     const lojaSlug = req.headers['x-loja-slug'];
     const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
     
     const { nome, tipo, dataHoraInicio, dataHoraFim, qtdPessoas, observacoes } = req.body;
+
+    const dataInicioObj = new Date(dataHoraInicio);
+    
+    // TRAVA DE SEGURANÇA: Data Retroativa (Tolerância de 1 hora para atrasos operacionais)
+    const agora = new Date();
+    agora.setHours(agora.getHours() - 1); 
+
+    if (dataInicioObj < agora) {
+      return res.status(400).json({ error: "ERRO GRAVE: Não é permitido criar eventos em datas ou horas passadas!" });
+    }
 
     const novoEvento = await prisma.eventoReserva.create({
       data: {
         nome,
         tipo: tipo || 'MISTO',
-        dataHoraInicio: new Date(dataHoraInicio),
+        dataHoraInicio: dataInicioObj,
         dataHoraFim: dataHoraFim ? new Date(dataHoraFim) : null,
         qtdPessoas: Number(qtdPessoas || 1),
         observacoes,
