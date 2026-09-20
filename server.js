@@ -5295,11 +5295,13 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
     const abertas = await prisma.restaurantTab.findMany({
       where: { lojaId: loja.id, shiftId: turnoAtual.id, status: 'OPEN' }
     });
+    
     const comandasEmUso = abertas.filter(t => t.type === 'TAB').map(t => t.number);
     const mesasEmUso = abertas.filter(t => t.type === 'TABLE').map(t => t.number);
 
     let importadosCount = 0;
     let errosCount = 0;
+    let erroDetalhe = "";
 
     for (const row of convidados) {
       try {
@@ -5313,18 +5315,7 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
           throw new Error(`Comanda ${comandaNum} já está em uso!`);
         }
 
-        // 1. Cadastrar ou Encontrar Cliente
-        let clienteSalvo = null;
-        if (cleanCpf && cleanCpf.length > 0) {
-          clienteSalvo = await prisma.user.findFirst({ where: { cpf: cleanCpf, lojaId: loja.id } });
-          if (!clienteSalvo) {
-            clienteSalvo = await prisma.user.create({
-              data: { lojaId: loja.id, name: row.nome, cpf: cleanCpf, email: row.email || `${cleanCpf}@cliente.com`, phone: row.telefone || null, password: 'senha_padrao_evento', role: 'CLIENT' }
-            });
-          }
-        }
-
-        // 2. CRIAR A MESA FÍSICA
+        // 1. CRIAR A MESA FÍSICA (Se não existir)
         if (mesaNum && !mesasEmUso.includes(mesaNum)) {
           await prisma.restaurantTab.create({
             data: {
@@ -5335,23 +5326,25 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
           mesasEmUso.push(mesaNum); 
         }
 
-        // 3. CRIAR A COMANDA INDIVIDUAL (AGORA COM CLIENT ID)
+        // 2. CRIAR A COMANDA INDIVIDUAL (Sem forçar cadastro global no BD)
         let novaTab = null;
         if (comandaNum) {
           novaTab = await prisma.restaurantTab.create({
             data: {
               lojaId: loja.id, number: comandaNum, type: 'TAB', status: 'OPEN',
-              customerName: row.nome, 
+              customerName: row.nome, // NOME GRAVADO DIRETO NA COMANDA
               customerCpf: cleanCpf,
-              clientId: clienteSalvo ? clienteSalvo.id : null, // 🔥 O SEGREDO ESTÁ AQUI!
-              linkedTable: mesaNum || null, seatLabel: row.posicaoMesa || 'Convidado VIP',
-              openedBy: 'Recepção (Evento)', shiftId: turnoAtual.id, eventoId: evento.id
+              linkedTable: mesaNum || null, 
+              seatLabel: row.posicaoMesa || 'Convidado',
+              openedBy: 'Recepção (Evento)', 
+              shiftId: turnoAtual.id, 
+              eventoId: evento.id
             }
           });
           comandasEmUso.push(comandaNum);
         }
 
-        // 4. Vincular o Convidado
+        // 3. Vincular o Convidado ao Evento
         await prisma.eventoConvidado.create({
           data: {
             eventoId: evento.id, nome: row.nome, cpf: cleanCpf, email: row.email || null, telefone: row.telefone || null,
@@ -5359,16 +5352,23 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
             tabId: novaTab ? novaTab.id : null, statusCheckIn: false 
           }
         });
+        
         importadosCount++;
       } catch (rowError) {
         errosCount++;
+        erroDetalhe = rowError.message; 
+        console.error("Erro na linha do CSV:", rowError);
       }
     }
 
-    if (importadosCount === 0 && errosCount > 0) return res.status(400).json({ error: `Falha. Verifique se as comandas já estão em uso. (${errosCount} erros)` });
-    res.json({ success: true, message: `${importadosCount} importados! ${errosCount > 0 ? `(${errosCount} ignorados por duplicidade de comanda)` : ''}` });
+    if (importadosCount === 0 && errosCount > 0) {
+       return res.status(400).json({ error: `Falha ao importar. Motivo: ${erroDetalhe || 'Erro no banco de dados'}` });
+    }
+    
+    res.json({ success: true, message: `${importadosCount} importados com sucesso! ${errosCount > 0 ? `(${errosCount} erros)` : ''}` });
 
   } catch (error) {
+    console.error("Erro geral na importação:", error);
     res.status(500).json({ error: "Erro interno ao processar a planilha." });
   }
 });
