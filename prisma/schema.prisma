@@ -85,9 +85,10 @@ model Loja {
   printers           Printer[]
   contasPagas        ContaPagar[]
   
-  // Relacionamento com o Franqueado (Dono da Carteira)
+  // Relacionamento com o Franqueado (Dono da Carteira) e eventos, reservas
   adminUserId        String?
   adminUser          AdminUser? @relation(fields: [adminUserId], references: [id])
+  eventos            EventoReserva[]
 }
 
 // ============================================================================
@@ -564,6 +565,13 @@ model RestaurantTab {
   createdAt    DateTime  @default(now())
   linkedTable  Int?
   updatedAt    DateTime  @updatedAt
+
+  //NOVOS CAMPOS PARA EVENTOS E RECEPÇÃO AQUI DENTRO:
+  eventoId        String?
+  evento          EventoReserva?   @relation(fields: [eventoId], references: [id])
+  
+  // Vínculo 1-para-1: Esta comanda/mesa pertence a um convidado específico da lista?
+  convidado       EventoConvidado?
 }
 
 model TabItem {
@@ -609,4 +617,63 @@ model ContaPagar {
   
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+// ============================================================================
+// MÓDULO DE RECEPÇÃO E EVENTOS
+// ============================================================================
+
+model EventoReserva {
+  id              String   @id @default(uuid())
+  nome            String   // Ex: "Confraternização TechCorp", "Aniversário do João"
+  
+  // Define o comportamento do evento
+  tipo            String   @default("MISTO") // "APENAS_MESAS", "APENAS_COMANDAS", "MISTO"
+  status          String   @default("AGENDADO") // AGENDADO, EM_ANDAMENTO, FINALIZADO, CANCELADO
+  
+  dataHoraInicio  DateTime
+  dataHoraFim     DateTime?
+  qtdPessoas      Int      @default(1)
+  observacoes     String?  // Ex: "Trazer bolo de surpresa às 22h"
+
+  // Vínculo Obrigatório com a Loja
+  lojaId          String
+  loja            Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  // Lista de Convidados importada do Excel/CSV
+  convidados      EventoConvidado[]
+
+  // Mesas e Comandas que já estão fisicamente abertas no Salão para este evento
+  tabsAtivas      RestaurantTab[] 
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EventoConvidado {
+  id              String   @id @default(uuid())
+  nome            String
+  cpf             String?
+  email           String?
+  telefone        String?
+  
+  // Controle da Porta (Hostess)
+  statusCheckIn   Boolean  @default(false)
+  horaCheckIn     DateTime?
+  
+  // Planejamento (O que veio da planilha)
+  mesaIndicada    String?  // Ex: "10" (Pode ser vazio se for só comanda)
+  posicaoMesa     String?  // Ex: "Lugar 2"
+  comandaIndicada String?  // Ex: "2001" (Pode ser vazio se for só reserva de mesa)
+  
+  // Vínculos
+  eventoId        String
+  evento          EventoReserva @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  // Quando ele chega e faz check-in, a comanda/mesa virtual vira uma TAB real no salão
+  tabId           String?       @unique 
+  tab             RestaurantTab? @relation(fields: [tabId], references: [id])
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }

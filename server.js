@@ -5098,6 +5098,172 @@ app.delete('/api/super/planos/:id', async (req, res) => {
   }
 });
 
+// ============================================================================
+// 🎉 MÓDULO DE RECEPÇÃO E EVENTOS (HOSTESS)
+// ============================================================================
+
+// 1. Listar Eventos da Loja
+app.get('/api/eventos', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
+
+    const eventos = await prisma.eventoReserva.findMany({
+      where: { lojaId: loja.id },
+      include: {
+        convidados: true,
+        tabsAtivas: true
+      },
+      orderBy: { dataHoraInicio: 'asc' }
+    });
+    
+    res.json(eventos);
+  } catch (error) {
+    console.error("Erro ao listar eventos:", error);
+    res.status(500).json({ error: "Erro interno ao listar eventos." });
+  }
+});
+
+// 2. Criar um Novo Evento
+app.post('/api/eventos', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    
+    const { nome, tipo, dataHoraInicio, dataHoraFim, qtdPessoas, observacoes } = req.body;
+
+    const novoEvento = await prisma.eventoReserva.create({
+      data: {
+        nome,
+        tipo: tipo || 'MISTO',
+        dataHoraInicio: new Date(dataHoraInicio),
+        dataHoraFim: dataHoraFim ? new Date(dataHoraFim) : null,
+        qtdPessoas: Number(qtdPessoas || 1),
+        observacoes,
+        lojaId: loja.id
+      }
+    });
+
+    res.json({ success: true, evento: novoEvento });
+  } catch (error) {
+    console.error("Erro ao criar evento:", error);
+    res.status(500).json({ error: "Erro ao criar evento." });
+  }
+});
+
+// 3. 🚀 A ROTA MÁGICA: Importar Planilha e Abrir Salão Automaticamente
+app.post('/api/eventos/:id/importar', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { convidados } = req.body; // Array vindo do Excel/CSV no Frontend
+    const lojaSlug = req.headers['x-loja-slug'];
+    
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    const evento = await prisma.eventoReserva.findUnique({ where: { id } });
+
+    if (!loja || !evento) return res.status(404).json({ error: "Evento ou Loja não encontrados" });
+
+    // Pega o turno aberto atual (para vincular as comandas que serão abertas)
+    const turnoAtual = await prisma.shift.findFirst({
+      where: { lojaId: loja.id, status: 'OPEN' }
+    });
+
+    if (!turnoAtual) {
+      return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto para importar as comandas!" });
+    }
+
+    let importadosCount = 0;
+
+    // Loop poderoso para processar cada linha da planilha
+    for (const row of convidados) {
+      if (!row.nome) continue; // Pula se a linha não tiver nome
+
+      // 1. Cadastrar/Atualizar o Cliente no CRM do restaurante (Se tiver CPF ou Email)
+      let clienteSalvo = null;
+      if (row.cpf) {
+        clienteSalvo = await prisma.user.findFirst({
+          where: { cpf: row.cpf, lojaId: loja.id }
+        });
+      }
+
+      if (!clienteSalvo && row.cpf) {
+        // Cria o cliente se ele não existir
+        clienteSalvo = await prisma.user.create({
+          data: {
+            lojaId: loja.id,
+            name: row.nome,
+            cpf: row.cpf,
+            email: row.email || `${row.cpf}@cliente.com`, // Email fake caso não tenha
+            phone: row.telefone,
+            password: 'senha_padrao_evento', // Senha irrelevante para salão
+            role: 'CLIENT'
+          }
+        });
+      }
+
+      // 2. Criar a Comanda/Mesa automaticamente no Salão (Se a planilha indicar)
+      let novaTab = null;
+      if (row.comandaIndicada) {
+        novaTab = await prisma.restaurantTab.create({
+          data: {
+            lojaId: loja.id,
+            number: Number(row.comandaIndicada),
+            type: 'TAB', // Comanda Individual
+            status: 'OPEN',
+            customerName: row.nome,
+            customerCpf: row.cpf || null,
+            linkedTable: row.mesaIndicada ? Number(row.mesaIndicada) : null,
+            seatLabel: row.posicaoMesa || 'Convidado VIP',
+            openedBy: 'Sistema (Recepção)',
+            shiftId: turnoAtual.id,
+            eventoId: evento.id
+          }
+        });
+      }
+
+      // 3. Vincular o convidado à lista do Evento e à Comanda criada
+      await prisma.eventoConvidado.create({
+        data: {
+          eventoId: evento.id,
+          nome: row.nome,
+          cpf: row.cpf || null,
+          email: row.email || null,
+          telefone: row.telefone || null,
+          mesaIndicada: row.mesaIndicada || null,
+          posicaoMesa: row.posicaoMesa || null,
+          comandaIndicada: row.comandaIndicada || null,
+          tabId: novaTab ? novaTab.id : null,
+          statusCheckIn: false // Ele ainda precisa chegar na porta e dar check-in
+        }
+      });
+
+      importadosCount++;
+    }
+
+    res.json({ success: true, message: `${importadosCount} convidados importados e comandas abertas com sucesso!` });
+  } catch (error) {
+    console.error("Erro na importação:", error);
+    res.status(500).json({ error: "Erro interno ao processar a planilha." });
+  }
+});
+
+// 4. Check-in na Porta (Quando o cliente chega)
+app.put('/api/eventos/convidado/:id/checkin', async (req, res) => {
+  try {
+    const convidado = await prisma.eventoConvidado.update({
+      where: { id: req.params.id },
+      data: {
+        statusCheckIn: true,
+        horaCheckIn: new Date()
+      }
+    });
+    res.json({ success: true, convidado });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao fazer check-in." });
+  }
+});
+
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () =>
     console.log(`🚀 ZenixFood Server Multi-Tenant rodando na porta ${PORT}`)
