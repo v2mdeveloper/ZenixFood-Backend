@@ -5112,8 +5112,12 @@ app.get('/api/eventos', async (req, res) => {
     const eventos = await prisma.eventoReserva.findMany({
       where: { lojaId: loja.id },
       include: {
-        convidados: true,
-        tabsAtivas: true
+        convidados: {
+          include: { tab: { include: { items: true } } }
+        },
+        tabsAtivas: {
+          include: { items: true }
+        }
       },
       orderBy: { dataHoraInicio: 'asc' }
     });
@@ -5273,18 +5277,40 @@ app.put('/api/eventos/convidado/:id/checkin', async (req, res) => {
 });
 
 // ============================================================================
-// 5. Editar e Finalizar Evento
+// 5. Editar e Finalizar Evento (COM TRAVA DE SEGURANÇA)
 // ============================================================================
 app.put('/api/eventos/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { nome, tipo, dataHoraInicio, dataHoraFim, qtdPessoas, observacoes, status } = req.body;
     
+    // Se estiver tentando finalizar, verifica se há contas abertas
+    if (status === 'FINALIZADO') {
+      const contasAbertas = await prisma.restaurantTab.count({
+        where: {
+          eventoId: id,
+          status: 'OPEN'
+        }
+      });
+
+      if (contasAbertas > 0) {
+        return res.status(400).json({ 
+          error: `Não é possível finalizar! Existem ${contasAbertas} mesas/comandas abertas vinculadas a este evento. O Caixa precisa encerrar e receber todas elas primeiro.` 
+        });
+      }
+    }
+
     const updateData = {};
     if (nome !== undefined) updateData.nome = nome;
     if (tipo !== undefined) updateData.tipo = tipo;
-    if (dataHoraInicio !== undefined) updateData.dataHoraInicio = new Date(dataHoraInicio);
-    if (dataHoraFim !== undefined) updateData.dataHoraFim = dataHoraFim ? new Date(dataHoraFim) : null;
+    
+    if (dataHoraInicio !== undefined && dataHoraInicio !== '') {
+      updateData.dataHoraInicio = new Date(dataHoraInicio);
+    }
+    if (dataHoraFim !== undefined) {
+      updateData.dataHoraFim = dataHoraFim ? new Date(dataHoraFim) : null;
+    }
+    
     if (qtdPessoas !== undefined) updateData.qtdPessoas = Number(qtdPessoas);
     if (observacoes !== undefined) updateData.observacoes = observacoes;
     if (status !== undefined) updateData.status = status;
@@ -5300,7 +5326,6 @@ app.put('/api/eventos/:id', async (req, res) => {
     res.status(500).json({ error: "Erro ao atualizar evento." });
   }
 });
-
 // ============================================================================
 // 6. Relatório Financeiro do Evento (Para Exportar CSV)
 // ============================================================================
@@ -5311,6 +5336,9 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
       include: {
         convidados: {
           include: { tab: { include: { items: true } } }
+        },
+        tabsAtivas: {
+          include: { items: true }
         }
       }
     });
@@ -5318,9 +5346,10 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
     if (!evento) return res.status(404).json({ error: "Evento não encontrado" });
 
     let totalEvento = 0;
+    
+    // Gasto nas Comandas Individuais
     const convidadosGasto = evento.convidados.map(c => {
       let gasto = 0;
-      // Soma tudo o que foi lançado na comanda deste convidado
       if (c.tab && c.tab.items) {
         gasto = c.tab.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
       }
@@ -5328,8 +5357,8 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
       
       return {
         nome: c.nome,
-        cpf: c.cpf || 'Não informado',
-        email: c.email || 'Não informado',
+        cpf: c.cpf || '-',
+        email: c.email || '-',
         mesa: c.mesaIndicada || '-',
         comanda: c.comandaIndicada || '-',
         checkIn: c.statusCheckIn ? 'SIM' : 'NAO',
@@ -5337,11 +5366,23 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
       };
     });
 
+    // Somar os gastos lançados DIRETAMENTE NAS MESAS (Coletivo)
+    const mesasColetivas = evento.tabsAtivas.filter(t => t.type === 'TABLE').map(t => {
+      const gastoMesa = t.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
+      totalEvento += gastoMesa;
+      return {
+        mesa: t.number,
+        qtdItens: t.items.length,
+        gasto: gastoMesa.toFixed(2)
+      };
+    });
+
     res.json({
       success: true,
       eventoNome: evento.nome,
       totalGasto: totalEvento.toFixed(2),
-      convidados: convidadosGasto
+      convidados: convidadosGasto,
+      mesasColetivas: mesasColetivas
     });
   } catch (error) {
     console.error("Erro ao gerar relatório:", error);
