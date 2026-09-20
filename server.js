@@ -5430,6 +5430,141 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
   }
 });
 
+
+// ============================================================================
+// MÓDULO DE CAIXA AMBULANTE (SMART POS PARA GARÇONS)
+// ============================================================================
+
+// 1. Verificar o status do Caixa do Funcionário
+app.get('/api/mobile-pos/meu-caixa', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const employeeName = req.headers['x-employee-name']; // Nome do garçom
+    
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
+
+    // Busca um caixa aberto por este funcionário na loja
+    const meuCaixa = await prisma.cashRegister.findFirst({
+      where: { lojaId: loja.id, openedBy: employeeName, status: 'OPEN' },
+      include: { movements: true }
+    });
+
+    res.json({ success: true, caixa: meuCaixa });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar caixa." });
+  }
+});
+
+// 2. Abrir o Caixa do Funcionário
+app.post('/api/mobile-pos/abrir', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { employeeName, openingBalance } = req.body;
+    
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    
+    // Verifica se a loja tem um Turno (Shift) Global aberto
+    const turnoGlobal = await prisma.shift.findFirst({
+      where: { lojaId: loja.id, status: 'OPEN' }
+    });
+
+    if (!turnoGlobal) {
+      return res.status(400).json({ error: "O Gerente precisa abrir o Turno da Loja primeiro antes dos garçons abrirem os caixas." });
+    }
+
+    // Verifica se já tem caixa aberto
+    const caixaExistente = await prisma.cashRegister.findFirst({
+      where: { lojaId: loja.id, openedBy: employeeName, status: 'OPEN' }
+    });
+
+    if (caixaExistente) return res.status(400).json({ error: "Você já possui um caixa aberto!" });
+
+    const novoCaixa = await prisma.cashRegister.create({
+      data: {
+        lojaId: loja.id,
+        shiftId: turnoGlobal.id,
+        openedBy: employeeName,
+        status: 'OPEN',
+        openingBalance: Number(openingBalance || 0)
+      }
+    });
+
+    res.json({ success: true, caixa: novoCaixa });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao abrir o caixa." });
+  }
+});
+
+// 3. Fechar o Caixa do Funcionário
+app.post('/api/mobile-pos/fechar', async (req, res) => {
+  try {
+    const { caixaId, closingDetails, closingBalance } = req.body;
+    
+    const caixaFechado = await prisma.cashRegister.update({
+      where: { id: caixaId },
+      data: {
+        status: 'CLOSED',
+        closedAt: new Date(),
+        closedBy: req.headers['x-employee-name'],
+        closingBalance: Number(closingBalance || 0),
+        closingDetails: closingDetails
+      }
+    });
+
+    res.json({ success: true, caixa: caixaFechado });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao fechar o caixa." });
+  }
+});
+
+// 4. Receber Pagamento e Encerrar a Mesa/Comanda
+app.post('/api/mobile-pos/pagar-conta', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const employeeName = req.headers['x-employee-name'];
+    const { tabId, pagamentos } = req.body; 
+    // pagamentos = [{ metodo: 'PIX', valor: 50 }, { metodo: 'CARTAOCREDITO', valor: 100 }]
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+
+    // Pega o caixa do funcionário
+    const meuCaixa = await prisma.cashRegister.findFirst({
+      where: { lojaId: loja.id, openedBy: employeeName, status: 'OPEN' }
+    });
+
+    if (!meuCaixa) return res.status(400).json({ error: "Você precisa abrir o seu caixa antes de cobrar uma mesa!" });
+
+    // Atualiza a Mesa/Comanda para PAID (Paga/Fechada)
+    const tabFechada = await prisma.restaurantTab.update({
+      where: { id: tabId },
+      data: { status: 'PAID' },
+      include: { items: true }
+    });
+
+    // Registra a entrada do dinheiro no Caixa do Garçom
+    let totalPago = 0;
+    for (const pag of pagamentos) {
+      totalPago += Number(pag.valor);
+      await prisma.cashMovement.create({
+        data: {
+          lojaId: loja.id,
+          registerId: meuCaixa.id,
+          type: 'IN', // Entrada
+          amount: Number(pag.valor),
+          reason: `Pagamento ${tabFechada.type === 'TABLE' ? 'Mesa' : 'Comanda'} ${tabFechada.number} - ${pag.metodo}`,
+          authorizedBy: employeeName
+        }
+      });
+    }
+
+    res.json({ success: true, message: "Conta encerrada e pagamento recebido com sucesso!", total: totalPago });
+  } catch (error) {
+    console.error("Erro ao pagar conta:", error);
+    res.status(500).json({ error: "Erro ao processar pagamento." });
+  }
+});
+
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () =>
     console.log(`🚀 ZenixFood Server Multi-Tenant rodando na porta ${PORT}`)
