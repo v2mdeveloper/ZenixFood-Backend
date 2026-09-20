@@ -3942,12 +3942,15 @@ app.post("/api/orders", async (req, res) => {
         }
 
         const finalTotal = baseTotal - finalDiscount;
-        let initialStatus =
-            paymentMethod === "PIX_ONLINE" ||
-            paymentMethod === "CREDIT_CARD_ONLINE"
-                ? "PENDING"
-                : "PREPARING";
-        if (finalOrigin === "PDV") initialStatus = "PREPARING";
+
+        let initialStatus = "PREPARING";
+        if (paymentMethod === "PIX_ONLINE" || paymentMethod === "CREDIT_CARD_ONLINE") {
+            initialStatus = "PENDING";
+        } else if (finalOrigin === "TOTEM" && paymentMethod === "PAGAR_NO_CAIXA") {
+            initialStatus = "AWAITING_PAYMENT"; // Vai para o KDS e pro PDV, mas fica travado esperando o caixa
+        } else if (finalOrigin === "PDV") {
+            initialStatus = "PREPARING";
+        }
 
         let finalAddress = address;
         if (appliedCoupon) {
@@ -4309,6 +4312,75 @@ app.post("/api/webhook", async (req, res) => {
     }
 });
 
+
+// ============================================================================
+// PDV - PEDIDOS AGUARDANDO PAGAMENTO (VINDOS DO TOTEM)
+// ============================================================================
+
+// 1. Listar pedidos aguardando pagamento
+app.get("/api/pdv/awaiting-payment", async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const orders = await prisma.order.findMany({
+      where: { 
+         lojaId: loja.id,
+         status: "AWAITING_PAYMENT" 
+      },
+      include: { 
+         client: true,
+         items: { include: { product: true } }
+      },
+      orderBy: { createdAt: 'asc' } // Os mais antigos primeiro (fila)
+    });
+
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar pedidos aguardando pagamento." });
+  }
+});
+
+// 2. PDV Confirma o Recebimento do Pedido do Totem
+app.put("/api/pdv/awaiting-payment/:id/approve", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paymentMethod } = req.body; // O Caixa diz como o cliente realmente pagou (Pix, Dinheiro, etc)
+    const employeeName = req.headers['x-employee-name'] || 'Caixa PDV';
+
+    const order = await prisma.order.update({
+      where: { id },
+      data: { 
+         status: "PREPARING", // Libera para a cozinha produzir de vez
+         paymentMethod: paymentMethod, // Atualiza para o método real
+         waiter: employeeName // Registra quem aprovou
+      }
+    });
+
+    // Aqui você pode adicionar a lógica de jogar o valor pro Caixa aberto (se estiver usando a tabela CashMovement do PDV fixo)
+
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao aprovar o pedido." });
+  }
+});
+
+// 3. PDV Cancela o Pedido do Totem (Cliente desistiu/sumiu)
+app.put("/api/pdv/awaiting-payment/:id/cancel", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const order = await prisma.order.update({
+      where: { id },
+      data: { status: "CANCELED" } // Cancela e some da tela de todos
+    });
+
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao cancelar o pedido." });
+  }
+});
 
 // ============================================================================
 // ROTA DE RELATÓRIOS: Listar Todos os Pedidos e Comandas Pagas (Admin)
