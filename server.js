@@ -5565,6 +5565,35 @@ app.post('/api/mobile-pos/pagar-conta', async (req, res) => {
   }
 });
 
+// 5. Sangria e Suprimento (Movimentos de Caixa Ambulante)
+app.post('/api/mobile-pos/movimento', async (req, res) => {
+  try {
+    const { caixaId, type, amount, reason } = req.body;
+    const employeeName = req.headers['x-employee-name'];
+
+    const caixa = await prisma.cashRegister.findUnique({ where: { id: caixaId } });
+    if (!caixa || caixa.status !== 'OPEN') {
+      return res.status(400).json({ error: "Caixa não encontrado ou já fechado." });
+    }
+
+    const movimento = await prisma.cashMovement.create({
+      data: {
+        lojaId: caixa.lojaId,
+        registerId: caixa.id,
+        type: type, // 'IN' (Suprimento) ou 'OUT' (Sangria)
+        amount: Number(amount),
+        reason: reason || (type === 'IN' ? 'Suprimento (Entrada)' : 'Sangria (Retirada)'),
+        authorizedBy: employeeName
+      }
+    });
+
+    res.json({ success: true, movimento });
+  } catch (error) {
+    console.error("Erro ao registrar movimento:", error);
+    res.status(500).json({ error: "Erro ao registrar movimento." });
+  }
+});
+
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () =>
     console.log(`🚀 ZenixFood Server Multi-Tenant rodando na porta ${PORT}`)
