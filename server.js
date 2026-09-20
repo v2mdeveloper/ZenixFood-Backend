@@ -4311,7 +4311,7 @@ app.post("/api/webhook", async (req, res) => {
 
 
 // ============================================================================
-// ROTA DE RELATÓRIOS: Listar Todos os Pedidos (Admin)
+// ROTA DE RELATÓRIOS: Listar Todos os Pedidos e Comandas Pagas (Admin)
 // ============================================================================
 app.get('/api/orders', async (req, res) => {
   try {
@@ -4319,48 +4319,69 @@ app.get('/api/orders', async (req, res) => {
     const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
 
-    // Removemos o 'tab: true' que estava causando o erro 500
+    // 1. Busca os Pedidos Normais (App, Delivery, Totem)
     const orders = await prisma.order.findMany({
       where: { lojaId: loja.id },
       include: { 
          client: true, 
          items: { include: { product: true } }
-      },
-      orderBy: { createdAt: 'desc' }
+      }
     });
 
-    // Busca o nome real pelo customerName do pedido ou tenta achar pelo tableNumber
-    const formatados = await Promise.all(orders.map(async (o) => {
-       let nomeReal = o.customerName || o.client?.name || 'Cliente Avulso';
-       let cpfReal = o.customerCpf || o.client?.cpf || null;
-
-       // Se for do salão e estiver como João Silva, vamos tentar descobrir de quem é a comanda real
-       if (o.origin === 'SALAO' && o.tableNumber) {
-           try {
-               const tabOrigem = await prisma.restaurantTab.findFirst({
-                   where: { number: Number(o.tableNumber), type: 'TAB', lojaId: loja.id },
-                   orderBy: { createdAt: 'desc' }
-               });
-               if (tabOrigem && tabOrigem.customerName) {
-                   nomeReal = tabOrigem.customerName;
-                   cpfReal = tabOrigem.customerCpf || cpfReal;
-               }
-           } catch (e) {
-               // Ignora se não achar
-           }
-       }
-
-       return {
-           ...o,
-           customerName: nomeReal,
-           customerCpf: cpfReal
-       };
+    const pedidosFormatados = orders.map(o => ({
+       ...o,
+       customerName: o.customerName || o.client?.name || 'Cliente Avulso',
+       customerCpf: o.customerCpf || o.client?.cpf || null
     }));
 
-    res.json(formatados);
+    // 2. Busca as Comandas e Mesas FECHADAS/PAGAS (Caixa Ambulante / PDV Salão)
+    // Isso garante que tudo o que foi recebido na mesa vá para o relatório!
+    const tabsFechadas = await prisma.restaurantTab.findMany({
+      where: {
+        lojaId: loja.id,
+        status: { in: ['PAID', 'CLOSED'] } // Pega apenas as que já foram cobradas!
+      },
+      include: { items: true } // Puxa o que foi consumido na mesa
+    });
+
+    const comandasFormatadas = tabsFechadas.map(t => {
+       // Calcula o total gasto na comanda
+       const totalComanda = t.items.reduce((acc, curr) => acc + (Number(curr.price) * curr.quantity), 0);
+
+       return {
+          id: t.id,
+          shortId: String(t.number),
+          number: t.number,
+          createdAt: t.updatedAt || t.createdAt, // Usa a data/hora em que foi paga
+          waiter: t.openedBy || 'Garçom / Caixa',
+          origin: 'SALAO',
+          status: 'PAID', // Define como Pago para o relatório somar
+          paymentMethod: 'MULTIPLE', // O PDV Ambulante aceita vários métodos juntos
+          customerName: t.customerName || (t.type === 'TABLE' ? `Mesa ${t.number}` : `Comanda #${t.number}`),
+          customerCpf: t.customerCpf || null,
+          total: totalComanda,
+          tableNumber: String(t.number),
+          
+          // Adapta os itens da comanda para o formato que o relatório entende
+          items: t.items.map(i => ({
+             id: i.id,
+             name: i.name,
+             price: i.price,
+             quantity: i.quantity,
+             product: { name: i.name } // O Frontend lê product.name
+          }))
+       };
+    });
+
+    // 3. Junta tudo (Pedidos + Comandas Pagas) e ordena pela data mais recente
+    const relatorioCompleto = [...pedidosFormatados, ...comandasFormatadas].sort((a, b) => {
+        return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    res.json(relatorioCompleto);
   } catch (error) {
     console.error("Erro ao buscar pedidos:", error);
-    res.status(500).json({ error: "Erro ao buscar pedidos" });
+    res.status(500).json({ error: "Erro ao buscar relatórios" });
   }
 });
 
