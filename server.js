@@ -5099,10 +5099,12 @@ app.delete('/api/super/planos/:id', async (req, res) => {
 });
 
 // ============================================================================
-// 🎉 MÓDULO DE RECEPÇÃO E EVENTOS (HOSTESS)
+// MÓDULO DE RECEPÇÃO E EVENTOS (HOSTESS)
 // ============================================================================
 
+// ============================================================================
 // 1. Listar Eventos da Loja
+// ============================================================================
 app.get('/api/eventos', async (req, res) => {
   try {
     const lojaSlug = req.headers['x-loja-slug'];
@@ -5113,13 +5115,17 @@ app.get('/api/eventos', async (req, res) => {
       where: { lojaId: loja.id },
       include: {
         convidados: {
-          include: { tab: { include: { items: true } } }
+          include: { 
+            tab: { 
+              include: { items: true } // ISSO TRAZ O EXTRATO INDIVIDUAL!
+            } 
+          }
         },
         tabsAtivas: {
-          include: { items: true }
+          include: { items: true } //ISSO TRAZ O EXTRATO DA MESA!
         }
       },
-      orderBy: { dataHoraInicio: 'asc' }
+      orderBy: { dataHoraInicio: 'desc' } // Mostra os eventos mais novos primeiro
     });
     
     res.json(eventos);
@@ -5326,6 +5332,7 @@ app.put('/api/eventos/:id', async (req, res) => {
     res.status(500).json({ error: "Erro ao atualizar evento." });
   }
 });
+
 // ============================================================================
 // 6. Relatório Financeiro do Evento (Para Exportar CSV)
 // ============================================================================
@@ -5347,7 +5354,6 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
 
     let totalEvento = 0;
     
-    // Gasto nas Comandas Individuais
     const convidadosGasto = evento.convidados.map(c => {
       let gasto = 0;
       if (c.tab && c.tab.items) {
@@ -5366,7 +5372,6 @@ app.get('/api/eventos/:id/relatorio', async (req, res) => {
       };
     });
 
-    // Somar os gastos lançados DIRETAMENTE NAS MESAS (Coletivo)
     const mesasColetivas = evento.tabsAtivas.filter(t => t.type === 'TABLE').map(t => {
       const gastoMesa = t.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
       totalEvento += gastoMesa;
