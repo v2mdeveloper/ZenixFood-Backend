@@ -5101,9 +5101,8 @@ app.delete('/api/super/planos/:id', async (req, res) => {
 // ============================================================================
 // MÓDULO DE RECEPÇÃO E EVENTOS (HOSTESS)
 // ============================================================================
-
 // ============================================================================
-// 1. Listar Eventos da Loja
+// 1. Listar Eventos da Loja (COM MEMÓRIA BLINDADA)
 // ============================================================================
 app.get('/api/eventos', async (req, res) => {
   try {
@@ -5114,24 +5113,86 @@ app.get('/api/eventos', async (req, res) => {
     const eventos = await prisma.eventoReserva.findMany({
       where: { lojaId: loja.id },
       include: {
-        convidados: {
-          include: { 
-            tab: { 
-              include: { items: true } // ISSO TRAZ O EXTRATO INDIVIDUAL!
-            } 
-          }
-        },
-        tabsAtivas: {
-          include: { items: true } //ISSO TRAZ O EXTRATO DA MESA!
-        }
+        convidados: { include: { tab: { include: { items: true } } } },
+        tabsAtivas: { include: { items: true } }
       },
-      orderBy: { dataHoraInicio: 'desc' } // Mostra os eventos mais novos primeiro
+      orderBy: { dataHoraInicio: 'desc' }
     });
     
-    res.json(eventos);
+    // 🔥 TIRA A FOTO DO CONSUMO E PROTEGE CONTRA A LIMPEZA DO CAIXA
+    const eventosFormatados = await Promise.all(eventos.map(async (ev) => {
+      if (ev.status === 'FINALIZADO') return ev; 
+
+      let extratoAntigo = ev.extratoFechamento || {};
+      if (typeof extratoAntigo === 'string') extratoAntigo = JSON.parse(extratoAntigo);
+
+      let totalEvento = 0;
+
+      const convidadosGasto = ev.convidados.map(c => {
+         let gastoAtual = 0;
+         if (c.tab && c.tab.items) {
+            gastoAtual = c.tab.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
+         }
+         
+         const convAntigo = extratoAntigo.convidados?.find(x => x.id === c.id);
+         const gastoAnterior = Number(convAntigo?.gastoBruto || 0);
+         const itemsAnteriores = convAntigo?.itemsSnapshot || [];
+
+         // Se o caixa zerar a mesa, mantém o valor alto anterior guardado!
+         const gastoFinal = Math.max(gastoAtual, gastoAnterior);
+         totalEvento += gastoFinal;
+
+         const itemsFinais = (c.tab && c.tab.items && c.tab.items.length >= itemsAnteriores.length) 
+            ? c.tab.items 
+            : itemsAnteriores;
+
+         return {
+            id: c.id, nome: c.nome, cpf: c.cpf || '-', email: c.email || '-',
+            mesa: c.mesaIndicada || '-', comanda: c.comandaIndicada || '-',
+            checkIn: c.statusCheckIn ? 'SIM' : 'NAO',
+            gasto: gastoFinal.toFixed(2), gastoBruto: gastoFinal,
+            itemsSnapshot: itemsFinais,
+            statusConta: c.tab ? c.tab.status : (convAntigo?.statusConta || 'FECHADA')
+         };
+      });
+
+      const mesasColetivas = ev.tabsAtivas.filter(t => t.type === 'TABLE').map(t => {
+         let gastoAtual = t.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
+         
+         const mesaAntiga = extratoAntigo.mesasColetivas?.find(x => x.mesa === t.number);
+         const gastoAnterior = Number(mesaAntiga?.gastoBruto || 0);
+         const itemsAnteriores = mesaAntiga?.itemsSnapshot || [];
+
+         const gastoFinal = Math.max(gastoAtual, gastoAnterior);
+         totalEvento += gastoFinal;
+
+         const itemsFinais = (t.items && t.items.length >= itemsAnteriores.length) ? t.items : itemsAnteriores;
+
+         return {
+            mesa: t.number, qtdItens: itemsFinais.length,
+            gasto: gastoFinal.toFixed(2), gastoBruto: gastoFinal,
+            itemsSnapshot: itemsFinais
+         };
+      });
+
+      const snapshotAtual = {
+         totalGasto: totalEvento.toFixed(2),
+         convidados: convidadosGasto,
+         mesasColetivas: mesasColetivas
+      };
+
+      await prisma.eventoReserva.update({
+         where: { id: ev.id }, data: { extratoFechamento: snapshotAtual }
+      });
+
+      ev.extratoFechamento = snapshotAtual;
+      return ev;
+    }));
+
+    res.json(eventosFormatados);
   } catch (error) {
     console.error("Erro ao listar eventos:", error);
-    res.status(500).json({ error: "Erro interno ao listar eventos." });
+    res.status(500).json({ error: "Erro interno." });
   }
 });
 
@@ -5334,63 +5395,24 @@ app.put('/api/eventos/:id', async (req, res) => {
 });
 
 // ============================================================================
-// 6. Relatório Financeiro do Evento (Para Exportar CSV)
+// 6. Relatório Financeiro do Evento (Puxa direto da Memória Blindada)
 // ============================================================================
 app.get('/api/eventos/:id/relatorio', async (req, res) => {
   try {
-    const evento = await prisma.eventoReserva.findUnique({
-      where: { id: req.params.id },
-      include: {
-        convidados: {
-          include: { tab: { include: { items: true } } }
-        },
-        tabsAtivas: {
-          include: { items: true }
-        }
-      }
-    });
-
+    const evento = await prisma.eventoReserva.findUnique({ where: { id: req.params.id } });
     if (!evento) return res.status(404).json({ error: "Evento não encontrado" });
 
-    let totalEvento = 0;
-    
-    const convidadosGasto = evento.convidados.map(c => {
-      let gasto = 0;
-      if (c.tab && c.tab.items) {
-        gasto = c.tab.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
-      }
-      totalEvento += gasto;
-      
-      return {
-        nome: c.nome,
-        cpf: c.cpf || '-',
-        email: c.email || '-',
-        mesa: c.mesaIndicada || '-',
-        comanda: c.comandaIndicada || '-',
-        checkIn: c.statusCheckIn ? 'SIM' : 'NAO',
-        gasto: gasto.toFixed(2)
-      };
-    });
-
-    const mesasColetivas = evento.tabsAtivas.filter(t => t.type === 'TABLE').map(t => {
-      const gastoMesa = t.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
-      totalEvento += gastoMesa;
-      return {
-        mesa: t.number,
-        qtdItens: t.items.length,
-        gasto: gastoMesa.toFixed(2)
-      };
-    });
+    let extrato = evento.extratoFechamento || {};
+    if (typeof extrato === 'string') extrato = JSON.parse(extrato);
 
     res.json({
       success: true,
       eventoNome: evento.nome,
-      totalGasto: totalEvento.toFixed(2),
-      convidados: convidadosGasto,
-      mesasColetivas: mesasColetivas
+      totalGasto: extrato.totalGasto || '0.00',
+      convidados: extrato.convidados || [],
+      mesasColetivas: extrato.mesasColetivas || []
     });
   } catch (error) {
-    console.error("Erro ao gerar relatório:", error);
     res.status(500).json({ error: "Erro interno ao gerar relatório." });
   }
 });

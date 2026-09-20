@@ -645,7 +645,7 @@ model EventoReserva {
 
   // Mesas e Comandas que já estão fisicamente abertas no Salão para este evento
   tabsAtivas      RestaurantTab[] 
-
+  extratoFechamento Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
