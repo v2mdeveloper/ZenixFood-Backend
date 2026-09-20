@@ -3915,7 +3915,7 @@ app.post("/api/orders", async (req, res) => {
         if (paymentMethod === "PIX_ONLINE" || paymentMethod === "CREDIT_CARD_ONLINE") {
             initialStatus = "PENDING";
         } else if (finalOrigin === "TOTEM" && paymentMethod === "PAGAR_NO_CAIXA") {
-            initialStatus = "AWAITING_PAYMENT";
+            initialStatus = "PENDING";
         } else if (finalOrigin === "PDV") {
             initialStatus = "PREPARING";
         }
@@ -4251,13 +4251,15 @@ app.get("/api/pdv/awaiting-payment", async (req, res) => {
     const orders = await prisma.order.findMany({
       where: { 
          lojaId: loja.id,
-         status: "AWAITING_PAYMENT" 
+         status: "PENDING",             // Procura os pendentes no Banco
+         origin: "TOTEM",               // Apenas do Totem
+         paymentMethod: "PAGAR_NO_CAIXA" // Que escolheram pagar no caixa
       },
       include: { 
          client: true,
          items: { include: { product: true } }
       },
-      orderBy: { createdAt: 'asc' } // Os mais antigos primeiro (fila)
+      orderBy: { createdAt: 'asc' }
     });
 
     res.json(orders);
