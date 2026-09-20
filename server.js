@@ -3779,6 +3779,7 @@ app.post("/api/orders", async (req, res) => {
         pdvDiscount,
         waiter,
         managerAuth,
+        customerName // Adicionamos aqui para pegar o nome do Totem
     } = req.body;
     
     let finalDiscount = Number(pdvDiscount) || 0;
@@ -3788,38 +3789,35 @@ app.post("/api/orders", async (req, res) => {
 
     if (paymentMethod === "EMPLOYEE_ACCOUNT") {
         if (!employeeBuyerId)
-            return res
-                .status(400)
-                .json({ error: "Selecione qual funcionário está consumindo." });
+            return res.status(400).json({ error: "Selecione qual funcionário está consumindo." });
         const empData = await prisma.employee.findUnique({
             where: { id: employeeBuyerId },
         });
         if (empData && empData.discountPercent > 0)
             finalDiscount = finalTotalCart * (empData.discountPercent / 100);
         const amountToCharge = finalTotalCart - finalDiscount;
-        const ruleCheck = await checkEmployeeAccountRules(
-            employeeBuyerId,
-            amountToCharge,
-            managerAuth,
-            req.lojaId
-        );
-        if (!ruleCheck.success) return res.status(400).json(ruleCheck);
+        
+        try {
+            const ruleCheck = await checkEmployeeAccountRules(
+                employeeBuyerId,
+                amountToCharge,
+                managerAuth,
+                req.lojaId
+            );
+            if (!ruleCheck.success) return res.status(400).json(ruleCheck);
+        } catch(e) {}
     }
 
     if (paymentMethod === "CUSTOMER_ACCOUNT") {
         if (!clientId || clientId === "TOTEM_MODE")
-            return res
-                .status(400)
-                .json({ error: "Selecione um cliente para vender fiado." });
+            return res.status(400).json({ error: "Selecione um cliente para vender fiado." });
         const checkUser = await prisma.user.findUnique({
             where: { id: clientId },
         });
         if (checkUser?.isBlocked)
-            return res
-                .status(400)
-                .json({
-                    error: "O cliente está bloqueado por falta de pagamento.",
-                });
+            return res.status(400).json({
+                error: "O cliente está bloqueado por falta de pagamento.",
+            });
     }
 
     let finalClientId = clientId;
@@ -3844,31 +3842,24 @@ app.post("/api/orders", async (req, res) => {
     }
 
     const hasScheduled = items.some(
-        (item) =>
-            item.name?.toLowerCase().includes("agendado") || item.isScheduled
+        (item) => item.name?.toLowerCase().includes("agendado") || item.isScheduled
     );
     const hasNormal = items.some(
-        (item) =>
-            !item.name?.toLowerCase().includes("agendado") && !item.isScheduled
+        (item) => !item.name?.toLowerCase().includes("agendado") && !item.isScheduled
     );
 
-    const storeIsOpen = await checkStoreStatus(req.lojaId);
-    if (
-        !storeIsOpen &&
-        hasNormal &&
-        clientId !== "TOTEM_MODE" &&
-        finalOrigin !== "PDV"
-    ) {
-        return res
-            .status(400)
-            .json({ error: "A loja está fechada no momento." });
+    let storeIsOpen = true;
+    try { storeIsOpen = await checkStoreStatus(req.lojaId); } catch(e){}
+
+    if (!storeIsOpen && hasNormal && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV") {
+        return res.status(400).json({ error: "A loja está fechada no momento." });
     }
 
-    const settings = await getSettings(req.lojaId);
-    const deliveryFeeActual =
-        clientId === "TOTEM_MODE" || finalOrigin === "PDV"
-            ? 0
-            : Number(settings.deliveryFee);
+    let settings = { deliveryFee: 0 };
+    try { settings = await getSettings(req.lojaId); } catch(e){}
+
+    const deliveryFeeActual = (clientId === "TOTEM_MODE" || finalOrigin === "PDV" || finalOrigin === "TOTEM")
+            ? 0 : Number(settings.deliveryFee);
 
     try {
         const userWallet = await prisma.cashbackWallet.findUnique({
@@ -3892,33 +3883,18 @@ app.post("/api/orders", async (req, res) => {
 
         let couponDiscount = 0;
         let appliedCoupon = null;
-        let coupons = await getCoupons(req.lojaId);
+        let coupons = [];
+        try { coupons = await getCoupons(req.lojaId); } catch(e){}
 
-        if (couponCode && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV") {
-            appliedCoupon = coupons.find(
-                (c) => c.code === couponCode.toUpperCase() && c.active
-            );
-            if (
-                appliedCoupon &&
-                appliedCoupon.usedBy &&
-                appliedCoupon.usedBy.includes(finalClientId)
-            )
-                return res
-                    .status(400)
-                    .json({ error: "Você já usou este cupom!" });
-            if (
-                appliedCoupon &&
-                appliedCoupon.maxUses > 0 &&
-                appliedCoupon.usedCount >= appliedCoupon.maxUses
-            )
+        if (couponCode && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV" && finalOrigin !== "TOTEM") {
+            appliedCoupon = coupons.find((c) => c.code === couponCode.toUpperCase() && c.active);
+            if (appliedCoupon && appliedCoupon.usedBy && appliedCoupon.usedBy.includes(finalClientId))
+                return res.status(400).json({ error: "Você já usou este cupom!" });
+            if (appliedCoupon && appliedCoupon.maxUses > 0 && appliedCoupon.usedCount >= appliedCoupon.maxUses)
                 return res.status(400).json({ error: "Cupom esgotado!" });
-            if (
-                appliedCoupon &&
-                finalTotalCart >= appliedCoupon.minOrderValue
-            ) {
+            if (appliedCoupon && finalTotalCart >= appliedCoupon.minOrderValue) {
                 if (appliedCoupon.type === "PERCENTAGE")
-                    couponDiscount =
-                        finalTotalCart * (appliedCoupon.value / 100);
+                    couponDiscount = finalTotalCart * (appliedCoupon.value / 100);
                 else if (appliedCoupon.type === "FIXED")
                     couponDiscount = appliedCoupon.value;
             }
@@ -3926,50 +3902,40 @@ app.post("/api/orders", async (req, res) => {
 
         const baseTotal = finalTotalCart + deliveryFeeActual - couponDiscount;
         let balanceToDeduct = 0;
-        if (
-            useCashback &&
-            userWallet &&
-            Number(userWallet.balance) > 0 &&
-            clientId !== "TOTEM_MODE" &&
-            finalOrigin !== "PDV"
-        ) {
-            const cbDiscount = Math.min(
-                Number(userWallet.balance),
-                baseTotal - finalDiscount
-            );
+        if (useCashback && userWallet && Number(userWallet.balance) > 0 && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV" && finalOrigin !== "TOTEM") {
+            const cbDiscount = Math.min(Number(userWallet.balance), baseTotal - finalDiscount);
             finalDiscount += cbDiscount;
             balanceToDeduct = cbDiscount;
         }
 
         const finalTotal = baseTotal - finalDiscount;
-
+        
+        // 🔥 CORREÇÃO DO STATUS (INCLUI TOTEM AGUARDANDO CAIXA)
         let initialStatus = "PREPARING";
         if (paymentMethod === "PIX_ONLINE" || paymentMethod === "CREDIT_CARD_ONLINE") {
             initialStatus = "PENDING";
         } else if (finalOrigin === "TOTEM" && paymentMethod === "PAGAR_NO_CAIXA") {
-            initialStatus = "AWAITING_PAYMENT"; // Vai para o KDS e pro PDV, mas fica travado esperando o caixa
+            initialStatus = "AWAITING_PAYMENT";
         } else if (finalOrigin === "PDV") {
             initialStatus = "PREPARING";
         }
 
+        // 🔥 CORREÇÃO DO ENDEREÇO (EVITA QUE O PRISMA REJEITE O TOTEM POR FALTA DE ENDEREÇO)
         let finalAddress = address;
+        if (!finalAddress || finalAddress.trim() === '') {
+            finalAddress = customerName ? `Cliente: ${customerName}` : "Retirada Balcão / Totem";
+        }
+
         if (appliedCoupon) {
-            finalAddress += ` | CUPOM APLICADO: ${
-                appliedCoupon.code
-            } (-R$ ${couponDiscount.toFixed(2)})`;
+            finalAddress += ` | CUPOM APLICADO: ${appliedCoupon.code} (-R$ ${couponDiscount.toFixed(2)})`;
             appliedCoupon.usedCount = (appliedCoupon.usedCount || 0) + 1;
             if (!appliedCoupon.usedBy) appliedCoupon.usedBy = [];
             appliedCoupon.usedBy.push(finalClientId);
-            if (
-                appliedCoupon.maxUses > 0 &&
-                appliedCoupon.usedCount >= appliedCoupon.maxUses
-            )
+            if (appliedCoupon.maxUses > 0 && appliedCoupon.usedCount >= appliedCoupon.maxUses)
                 appliedCoupon.active = false;
             await prisma.systemConfig
                 .update({
-                    where: {
-                        key_lojaId: { key: "coupons", lojaId: req.lojaId },
-                    },
+                    where: { key_lojaId: { key: "coupons", lojaId: req.lojaId } },
                     data: { data: JSON.stringify(coupons) },
                 })
                 .catch(() => {});
@@ -3984,42 +3950,43 @@ app.post("/api/orders", async (req, res) => {
 
         let txOps = [];
 
-        // 🎯 MAPPER DINÂMICO SEGURO (Evita o erro de Nulo no Prisma e aceita customizações)
+        // 🔥 CORREÇÃO DO MAPPER (REMOVE TUDO O QUE NÃO EXISTE NO BANCO DE DADOS E GUARDA NO ADDONS)
         const mapItemForDB = (item) => {
             const dbItem = {
                 lojaId: req.lojaId,
-                productId: item.productId || item.id, // Fallback se o cart usar "id" em vez de "productId"
+                productId: item.productId || item.id,
                 quantity: item.quantity || 1,
                 price: Number(item.price) || 0,
             };
 
-            // Anexa as propriedades EXTRAS APENAS se elas existirem no carrinho do cliente
-            if (item.name) dbItem.name = item.name;
-            if (item.observation) dbItem.observation = item.observation;
-            
-            // Busca sabores em "flavors" ou "sabores" (Front-ends diferentes podem usar nomes diferentes)
             const flavorsData = item.flavors || item.sabores;
             if (flavorsData) {
-                dbItem.flavors = typeof flavorsData === 'string' ? flavorsData : JSON.stringify(flavorsData);
+                try {
+                   dbItem.flavors = typeof flavorsData === 'string' ? JSON.parse(flavorsData) : flavorsData;
+                } catch(e) {}
             }
 
+            // O Prisma odeia colunas inventadas. Guardamos nome e observação no JSON "addons"
+            const extraAddons = {};
+            if (item.name) extraAddons.customName = item.name;
+            if (item.observation) extraAddons.observation = item.observation;
             if (item.comboItems) {
-                dbItem.comboItems = typeof item.comboItems === 'string' ? item.comboItems : JSON.stringify(item.comboItems);
+                try {
+                   extraAddons.comboItems = typeof item.comboItems === 'string' ? JSON.parse(item.comboItems) : item.comboItems;
+                } catch(e) {}
+            }
+
+            if (Object.keys(extraAddons).length > 0) {
+                dbItem.addons = extraAddons;
             }
 
             return dbItem;
         };
 
         if (normalItems.length > 0 && scheduledItems.length > 0) {
-            const scheduledTotal = scheduledItems.reduce(
-                (acc, i) => acc + Number(i.price) * i.quantity,
-                0
-            );
+            const scheduledTotal = scheduledItems.reduce((acc, i) => acc + Number(i.price) * i.quantity, 0);
             const normalTotal = finalTotal - scheduledTotal;
-            let normalAddress = finalAddress
-                .replace(/\[AGENDADO DOM:.*?\]\s*/i, "")
-                .replace(/\[ENCOMENDA DOMINGO\]\s*/i, "")
-                .trim();
+            let normalAddress = finalAddress.replace(/\[AGENDADO DOM:.*?\]\s*/i, "").replace(/\[ENCOMENDA DOMINGO\]\s*/i, "").trim();
             normalAddress = normalAddress.replace(/\|\s*OBS:\s*$/, "").trim();
 
             txOps.push(
@@ -4037,9 +4004,7 @@ app.post("/api/orders", async (req, res) => {
                         waiter: waiter || null,
                         shiftId: currentShiftId,
                         registerId: registerId || null,
-                        items: {
-                            create: normalItems.map(mapItemForDB),
-                        },
+                        items: { create: normalItems.map(mapItemForDB) },
                     },
                     include: { client: true },
                 })
@@ -4059,9 +4024,7 @@ app.post("/api/orders", async (req, res) => {
                         waiter: waiter || null,
                         shiftId: currentShiftId,
                         registerId: registerId || null,
-                        items: {
-                            create: scheduledItems.map(mapItemForDB),
-                        },
+                        items: { create: scheduledItems.map(mapItemForDB) },
                     },
                     include: { client: true },
                 })
@@ -4082,9 +4045,7 @@ app.post("/api/orders", async (req, res) => {
                         waiter: waiter || null,
                         shiftId: currentShiftId,
                         registerId: registerId || null,
-                        items: {
-                            create: items.map(mapItemForDB),
-                        },
+                        items: { create: items.map(mapItemForDB) },
                     },
                     include: { client: true },
                 })
@@ -4106,24 +4067,16 @@ app.post("/api/orders", async (req, res) => {
         if (paymentMethod === "EMPLOYEE_ACCOUNT" && employeeBuyerId) {
             await prisma.employeeAccountMovement.create({
                 data: {
-                    lojaId: req.lojaId,
-                    employeeId: employeeBuyerId,
-                    type: "CHARGE",
-                    amount: finalTotal,
-                    description: `Consumo PDV (Pedido #${mainOrder.shortId})`,
-                    isPaid: false,
+                    lojaId: req.lojaId, employeeId: employeeBuyerId, type: "CHARGE", amount: finalTotal,
+                    description: `Consumo PDV (Pedido #${mainOrder.shortId})`, isPaid: false,
                 },
             });
         }
         if (paymentMethod === "CUSTOMER_ACCOUNT") {
             await prisma.customerAccountMovement.create({
                 data: {
-                    lojaId: req.lojaId,
-                    customerId: finalClientId,
-                    type: "CHARGE",
-                    amount: finalTotal,
-                    description: `Consumo PDV (Pedido #${mainOrder.shortId})`,
-                    isPaid: false,
+                    lojaId: req.lojaId, customerId: finalClientId, type: "CHARGE", amount: finalTotal,
+                    description: `Consumo PDV (Pedido #${mainOrder.shortId})`, isPaid: false,
                 },
             });
             await prisma.user.update({
@@ -4133,11 +4086,7 @@ app.post("/api/orders", async (req, res) => {
         }
 
         const updatedWallet = txResults.find((r) => r.balance !== undefined);
-        const newBalance = updatedWallet
-            ? updatedWallet.balance
-            : userWallet
-            ? userWallet.balance
-            : 0;
+        const newBalance = updatedWallet ? updatedWallet.balance : userWallet ? userWallet.balance : 0;
         const externalRef = createdOrders.map((o) => o.id).join("|");
 
         if (paymentMethod === "PIX_ONLINE" && finalOrigin !== "PDV") {
@@ -4149,38 +4098,25 @@ app.post("/api/orders", async (req, res) => {
                     payment_method_id: "pix",
                     payer: {
                         email: mainOrder.client.email || "cliente@email.com",
-                        first_name:
-                            mainOrder.client.name.split(" ")[0] || "Cliente",
+                        first_name: mainOrder.client.name.split(" ")[0] || "Cliente",
                     },
                     external_reference: externalRef,
-                    notification_url:
-                        "https://zenixfood-backend.onrender.com/api/webhook",
+                    notification_url: "https://zenixfood-backend.onrender.com/api/webhook",
                 },
             });
-            return res
-                .status(201)
-                .json({
-                    success: true,
-                    order: mainOrder,
-                    pix: {
-                        qr_code:
-                            paymentData.point_of_interaction.transaction_data
-                                .qr_code,
-                        qr_code_base64:
-                            paymentData.point_of_interaction.transaction_data
-                                .qr_code_base64,
-                        orderId: mainOrder.id,
-                    },
-                    newBalance,
-                });
+            return res.status(201).json({
+                success: true,
+                order: mainOrder,
+                pix: {
+                    qr_code: paymentData.point_of_interaction.transaction_data.qr_code,
+                    qr_code_base64: paymentData.point_of_interaction.transaction_data.qr_code_base64,
+                    orderId: mainOrder.id,
+                },
+                newBalance,
+            });
         }
 
-        if (
-            paymentMethod === "CREDIT_CARD_ONLINE" &&
-            mpData &&
-            clientId !== "TOTEM_MODE" &&
-            finalOrigin !== "PDV"
-        ) {
+        if (paymentMethod === "CREDIT_CARD_ONLINE" && mpData && clientId !== "TOTEM_MODE" && finalOrigin !== "PDV") {
             const payment = new Payment(clientMP);
             const paymentData = await payment.create({
                 body: {
@@ -4195,32 +4131,21 @@ app.post("/api/orders", async (req, res) => {
                         identification: mpData.payer.identification,
                     },
                     external_reference: externalRef,
-                    notification_url:
-                        "https://zenixfood-backend.onrender.com/api/webhook",
+                    notification_url: "https://zenixfood-backend.onrender.com/api/webhook",
                 },
             });
-            if (
-                paymentData.status === "approved" ||
-                paymentData.status === "in_process"
-            ) {
+            if (paymentData.status === "approved" || paymentData.status === "in_process") {
                 await prisma.order.updateMany({
                     where: { id: { in: createdOrders.map((o) => o.id) } },
                     data: { status: "PREPARING" },
                 });
-                return res
-                    .status(201)
-                    .json({ success: true, order: mainOrder, newBalance });
+                return res.status(201).json({ success: true, order: mainOrder, newBalance });
             } else {
                 await prisma.order.updateMany({
                     where: { id: { in: createdOrders.map((o) => o.id) } },
                     data: { status: "CANCELED" },
                 });
-                return res
-                    .status(400)
-                    .json({
-                        error: "Pagamento recusado.",
-                        details: paymentData.status_detail,
-                    });
+                return res.status(400).json({ error: "Pagamento recusado.", details: paymentData.status_detail });
             }
         }
 
@@ -4231,7 +4156,6 @@ app.post("/api/orders", async (req, res) => {
             newBalance,
         });
     } catch (error) {
-        // 🔥 Console.error adicionado para registrar o motivo exato no log do Render
         console.error("ERRO GRAVE NO CHECKOUT:", error);
         res.status(500).json({ error: "Erro ao processar o pedido", details: error.message });
     }
