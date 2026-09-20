@@ -5153,12 +5153,12 @@ app.post('/api/eventos', async (req, res) => {
 });
 
 // ============================================================================
-// 3.Importar Planilha e Abrir Salão (VERSÃO BLINDADA)
+// 3. Importar Planilha e Abrir Salão (VERSÃO DEFINITIVA)
 // ============================================================================
 app.post('/api/eventos/:id/importar', async (req, res) => {
   try {
     const { id } = req.params;
-    const { convidados } = req.body; // Array vindo do Excel/CSV no Frontend
+    const { convidados } = req.body; 
     const lojaSlug = req.headers['x-loja-slug'];
     
     const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
@@ -5166,107 +5166,93 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
 
     if (!loja || !evento) return res.status(404).json({ error: "Evento ou Loja não encontrados" });
 
-    // Pega o turno aberto atual (para vincular as comandas que serão abertas)
     const turnoAtual = await prisma.shift.findFirst({
       where: { lojaId: loja.id, status: 'OPEN' }
     });
 
-    if (!turnoAtual) {
-      return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto no salão para gerar as comandas!" });
-    }
+    if (!turnoAtual) return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto no salão para gerar as comandas!" });
+
+    // 🛡️ BUSCA TUDO QUE JÁ ESTÁ ABERTO PARA EVITAR DUPLICAÇÃO
+    const abertas = await prisma.restaurantTab.findMany({
+      where: { lojaId: loja.id, shiftId: turnoAtual.id, status: 'OPEN' }
+    });
+    const comandasEmUso = abertas.filter(t => t.type === 'TAB').map(t => t.number);
+    const mesasEmUso = abertas.filter(t => t.type === 'TABLE').map(t => t.number);
 
     let importadosCount = 0;
     let errosCount = 0;
+    let erroDetails = "";
 
-    // Loop poderoso para processar cada linha da planilha com Try/Catch INDIVIDUAL
     for (const row of convidados) {
       try {
-        if (!row.nome || row.nome.trim() === '') continue; // Pula linhas vazias
+        if (!row.nome || row.nome.trim() === '') continue; 
 
-        // 🛡️ LIMPEZA DE DADOS (Garante que o Prisma não trave com textos acidentais)
         const cleanCpf = row.cpf ? String(row.cpf).replace(/\D/g, '') : null;
-        const comandaStr = row.comandaIndicada ? String(row.comandaIndicada).replace(/\D/g, '') : null;
-        const mesaStr = row.mesaIndicada ? String(row.mesaIndicada).replace(/\D/g, '') : null;
+        const comandaNum = row.comandaIndicada ? Number(String(row.comandaIndicada).replace(/\D/g, '')) : null;
+        const mesaNum = row.mesaIndicada ? Number(String(row.mesaIndicada).replace(/\D/g, '')) : null;
 
-        // 1. Cadastrar/Atualizar o Cliente no CRM do restaurante
+        // 🚨 VALIDAÇÃO: Impede comandas iguais no mesmo dia
+        if (comandaNum && comandasEmUso.includes(comandaNum)) {
+          erroDetails = `Comanda ${comandaNum} já está em uso!`;
+          throw new Error(erroDetails);
+        }
+
+        // 1. Cadastrar Cliente
         let clienteSalvo = null;
         if (cleanCpf && cleanCpf.length > 0) {
-          clienteSalvo = await prisma.user.findFirst({
-            where: { cpf: cleanCpf, lojaId: loja.id }
-          });
-
+          clienteSalvo = await prisma.user.findFirst({ where: { cpf: cleanCpf, lojaId: loja.id } });
           if (!clienteSalvo) {
-            // Cria o cliente se ele não existir
             clienteSalvo = await prisma.user.create({
-              data: {
-                lojaId: loja.id,
-                name: row.nome,
-                cpf: cleanCpf,
-                email: row.email || `${cleanCpf}@cliente.com`, // Email fake de segurança
-                phone: row.telefone || null,
-                password: 'senha_padrao_evento',
-                role: 'CLIENT'
-              }
+              data: { lojaId: loja.id, name: row.nome, cpf: cleanCpf, email: row.email || `${cleanCpf}@cliente.com`, phone: row.telefone || null, password: 'senha_padrao_evento', role: 'CLIENT' }
             });
           }
         }
 
-        // 2. Criar a Comanda/Mesa automaticamente no Salão
-        let novaTab = null;
-        if (comandaStr && comandaStr !== '') {
-          novaTab = await prisma.restaurantTab.create({
+        // 2. 🪑 CRIAR A MESA FÍSICA SE ELA AINDA NÃO EXISTIR (Para aparecer no Salão)
+        if (mesaNum && !mesasEmUso.includes(mesaNum)) {
+          await prisma.restaurantTab.create({
             data: {
-              lojaId: loja.id,
-              number: Number(comandaStr), // Agora garantido que é apenas número
-              type: 'TAB', // Comanda Individual
-              status: 'OPEN',
-              customerName: row.nome,
-              customerCpf: cleanCpf,
-              linkedTable: mesaStr && mesaStr !== '' ? Number(mesaStr) : null,
-              seatLabel: row.posicaoMesa || 'Convidado VIP',
-              openedBy: 'Sistema (Recepção)',
-              shiftId: turnoAtual.id,
-              eventoId: evento.id
+              lojaId: loja.id, number: mesaNum, type: 'TABLE', status: 'OPEN',
+              openedBy: 'Recepção (Evento)', shiftId: turnoAtual.id, eventoId: evento.id
             }
           });
+          mesasEmUso.push(mesaNum); // Adiciona na memória para não criar a mesa de novo no próximo convidado
         }
 
-        // 3. Vincular o convidado à lista do Evento
+        // 3. CRIAR A COMANDA INDIVIDUAL
+        let novaTab = null;
+        if (comandaNum) {
+          novaTab = await prisma.restaurantTab.create({
+            data: {
+              lojaId: loja.id, number: comandaNum, type: 'TAB', status: 'OPEN',
+              customerName: row.nome, customerCpf: cleanCpf,
+              linkedTable: mesaNum || null, seatLabel: row.posicaoMesa || 'Convidado VIP',
+              openedBy: 'Recepção (Evento)', shiftId: turnoAtual.id, eventoId: evento.id
+            }
+          });
+          comandasEmUso.push(comandaNum);
+        }
+
+        // 4. Vincular o Convidado
         await prisma.eventoConvidado.create({
           data: {
-            eventoId: evento.id,
-            nome: row.nome,
-            cpf: cleanCpf,
-            email: row.email || null,
-            telefone: row.telefone || null,
-            mesaIndicada: row.mesaIndicada || null, // Guarda o texto original para visualização
-            posicaoMesa: row.posicaoMesa || null,
-            comandaIndicada: row.comandaIndicada || null,
-            tabId: novaTab ? novaTab.id : null,
-            statusCheckIn: false 
+            eventoId: evento.id, nome: row.nome, cpf: cleanCpf, email: row.email || null, telefone: row.telefone || null,
+            mesaIndicada: row.mesaIndicada || null, posicaoMesa: row.posicaoMesa || null, comandaIndicada: row.comandaIndicada || null,
+            tabId: novaTab ? novaTab.id : null, statusCheckIn: false 
           }
         });
-
         importadosCount++;
       } catch (rowError) {
-        // Se uma pessoa der erro (ex: CPF duplicado), loga o erro mas NÃO cancela o resto!
-        console.error(`🔥 Erro ao importar o convidado [${row.nome}]:`, rowError);
+        console.error(`Erro ao importar o convidado [${row.nome}]:`, rowError.message);
         errosCount++;
       }
     }
 
-    if (importadosCount === 0 && errosCount > 0) {
-      return res.status(500).json({ error: `Nenhum convidado foi importado. Ocorreram ${errosCount} erros nos dados da planilha.` });
-    }
-
-    res.json({ 
-      success: true, 
-      message: `${importadosCount} convidados importados com sucesso! ${errosCount > 0 ? `(${errosCount} linhas ignoradas por erro)` : ''}` 
-    });
+    if (importadosCount === 0 && errosCount > 0) return res.status(400).json({ error: `Falha. Verifique se as comandas já estão em uso. (${errosCount} erros)` });
+    res.json({ success: true, message: `${importadosCount} importados! ${errosCount > 0 ? `(${errosCount} ignorados por duplicidade de comanda)` : ''}` });
 
   } catch (error) {
-    console.error("🔥 Erro fatal na importação:", error);
-    res.status(500).json({ error: "Erro interno fatal ao processar a planilha." });
+    res.status(500).json({ error: "Erro interno ao processar a planilha." });
   }
 });
 
@@ -5283,6 +5269,83 @@ app.put('/api/eventos/convidado/:id/checkin', async (req, res) => {
     res.json({ success: true, convidado });
   } catch (error) {
     res.status(500).json({ error: "Erro ao fazer check-in." });
+  }
+});
+
+// ============================================================================
+// 5. Editar e Finalizar Evento
+// ============================================================================
+app.put('/api/eventos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, tipo, dataHoraInicio, dataHoraFim, qtdPessoas, observacoes, status } = req.body;
+    
+    const updateData = {};
+    if (nome !== undefined) updateData.nome = nome;
+    if (tipo !== undefined) updateData.tipo = tipo;
+    if (dataHoraInicio !== undefined) updateData.dataHoraInicio = new Date(dataHoraInicio);
+    if (dataHoraFim !== undefined) updateData.dataHoraFim = dataHoraFim ? new Date(dataHoraFim) : null;
+    if (qtdPessoas !== undefined) updateData.qtdPessoas = Number(qtdPessoas);
+    if (observacoes !== undefined) updateData.observacoes = observacoes;
+    if (status !== undefined) updateData.status = status;
+
+    const eventoAtualizado = await prisma.eventoReserva.update({
+      where: { id },
+      data: updateData
+    });
+    
+    res.json({ success: true, evento: eventoAtualizado });
+  } catch (error) {
+    console.error("Erro ao atualizar evento:", error);
+    res.status(500).json({ error: "Erro ao atualizar evento." });
+  }
+});
+
+// ============================================================================
+// 6. Relatório Financeiro do Evento (Para Exportar CSV)
+// ============================================================================
+app.get('/api/eventos/:id/relatorio', async (req, res) => {
+  try {
+    const evento = await prisma.eventoReserva.findUnique({
+      where: { id: req.params.id },
+      include: {
+        convidados: {
+          include: { tab: { include: { items: true } } }
+        }
+      }
+    });
+
+    if (!evento) return res.status(404).json({ error: "Evento não encontrado" });
+
+    let totalEvento = 0;
+    const convidadosGasto = evento.convidados.map(c => {
+      let gasto = 0;
+      // Soma tudo o que foi lançado na comanda deste convidado
+      if (c.tab && c.tab.items) {
+        gasto = c.tab.items.reduce((acc, item) => acc + (Number(item.price) * item.quantity), 0);
+      }
+      totalEvento += gasto;
+      
+      return {
+        nome: c.nome,
+        cpf: c.cpf || 'Não informado',
+        email: c.email || 'Não informado',
+        mesa: c.mesaIndicada || '-',
+        comanda: c.comandaIndicada || '-',
+        checkIn: c.statusCheckIn ? 'SIM' : 'NAO',
+        gasto: gasto.toFixed(2)
+      };
+    });
+
+    res.json({
+      success: true,
+      eventoNome: evento.nome,
+      totalGasto: totalEvento.toFixed(2),
+      convidados: convidadosGasto
+    });
+  } catch (error) {
+    console.error("Erro ao gerar relatório:", error);
+    res.status(500).json({ error: "Erro interno ao gerar relatório." });
   }
 });
 
