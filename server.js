@@ -4319,21 +4319,42 @@ app.get('/api/orders', async (req, res) => {
     const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
     if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
 
+    // Removemos o 'tab: true' que estava causando o erro 500
     const orders = await prisma.order.findMany({
       where: { lojaId: loja.id },
       include: { 
          client: true, 
-         items: { include: { product: true } },
-         tab: true 
+         items: { include: { product: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
 
-    // Garante que o nome real da Comanda/Evento sobreponha o cliente genérico
-    const formatados = orders.map(o => ({
-       ...o,
-       customerName: o.tab?.customerName || o.customerName || o.client?.name || 'Cliente Avulso',
-       customerCpf: o.tab?.customerCpf || o.customerCpf || o.client?.cpf || null
+    // Busca o nome real pelo customerName do pedido ou tenta achar pelo tableNumber
+    const formatados = await Promise.all(orders.map(async (o) => {
+       let nomeReal = o.customerName || o.client?.name || 'Cliente Avulso';
+       let cpfReal = o.customerCpf || o.client?.cpf || null;
+
+       // Se for do salão e estiver como João Silva, vamos tentar descobrir de quem é a comanda real
+       if (o.origin === 'SALAO' && o.tableNumber) {
+           try {
+               const tabOrigem = await prisma.restaurantTab.findFirst({
+                   where: { number: Number(o.tableNumber), type: 'TAB', lojaId: loja.id },
+                   orderBy: { createdAt: 'desc' }
+               });
+               if (tabOrigem && tabOrigem.customerName) {
+                   nomeReal = tabOrigem.customerName;
+                   cpfReal = tabOrigem.customerCpf || cpfReal;
+               }
+           } catch (e) {
+               // Ignora se não achar
+           }
+       }
+
+       return {
+           ...o,
+           customerName: nomeReal,
+           customerCpf: cpfReal
+       };
     }));
 
     res.json(formatados);
