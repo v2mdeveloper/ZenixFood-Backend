@@ -3690,73 +3690,53 @@ app.post("/api/salao/tabs/:tabId/close", async (req, res) => {
 // ==============================================================
 // 9. KDS
 // ==============================================================
-app.get("/api/kds", async (req, res) => {
-    try {
-        const activeShift = await prisma.shift.findFirst({
-            where: { status: "OPEN", lojaId: req.lojaId },
-            orderBy: { createdAt: "desc" },
-        });
-        const shiftId = activeShift ? activeShift.id : "none";
+app.get('/api/kds', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
 
-        const appOrders = await prisma.order.findMany({
-            where: {
-                lojaId: req.lojaId,
-                origin: "APP",
-                OR: [
-                    {
-                        status: {
-                            in: ["PENDING", "PREPARING", "READY", "IN_TRANSIT"],
-                        },
-                    },
-                    { status: "DELIVERED", shiftId: shiftId },
-                ],
-            },
-            include: {
-                client: true,
-                items: {
-                    include: { product: { include: { category: true } } },
-                },
-            },
-            orderBy: { createdAt: "asc" },
-        });
+    // Pega data de hoje (madrugada) para não puxar pedido antigo que ficou travado
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-        const totemOrders = await prisma.order.findMany({
-            where: {
-                lojaId: req.lojaId,
-                origin: "TOTEM",
-                OR: [
-                    { status: { in: ["PREPARING", "READY"] } },
-                    { status: "DELIVERED", shiftId: shiftId },
-                ],
-            },
-            include: {
-                client: true,
-                items: {
-                    include: { product: { include: { category: true } } },
-                },
-            },
-            orderBy: { createdAt: "asc" },
-        });
+    // BUSCA TODOS OS PEDIDOS (App, Delivery, Totem, PDV)
+    const orders = await prisma.order.findMany({
+      where: {
+        lojaId: loja.id,
+        createdAt: { gte: today },
+        // 'PENDING' na lista para o Totem aparecer na cozinha!
+        status: { in: ['PENDING', 'PREPARING', 'READY', 'IN_TRANSIT', 'DELIVERED'] } 
+      },
+      include: { 
+         client: true,
+         items: { include: { product: { include: { category: true } } } }
+      },
+      orderBy: { createdAt: 'asc' }
+    });
 
-        const salaoItems = await prisma.tabItem.findMany({
-            where: {
-                lojaId: req.lojaId,
-                tab: { status: "OPEN" },
-                OR: [
-                    { status: { in: ["PENDING", "PREPARING", "READY"] } },
-                    { status: "SERVED", tab: { shiftId: shiftId } },
-                ],
-            },
-            include: { tab: true, product: { include: { category: true } } },
-            orderBy: { createdAt: "asc" },
-        });
+    const appOrders = orders.filter(o => o.origin === 'APP');
+    const totemOrders = orders.filter(o => o.origin === 'TOTEM' || o.origin === 'PDV');
 
-        res.json({ success: true, appOrders, totemOrders, salaoItems });
-    } catch (e) {
-        res.status(500).json({
-            error: "Erro ao buscar dados unificados do KDS.",
-        });
-    }
+    // Busca itens das comandas/mesas do salão
+    const salaoItems = await prisma.tabItem.findMany({
+      where: {
+        lojaId: loja.id,
+        // Também inclui PENDING aqui por segurança do salão
+        status: { in: ['PENDING', 'PREPARING', 'READY', 'SERVED'] }
+      },
+      include: { 
+         product: { include: { category: true } },
+         tab: true
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    res.json({ appOrders, totemOrders, salaoItems });
+  } catch (error) {
+    console.error("Erro no KDS:", error);
+    res.status(500).json({ error: "Erro interno no KDS." });
+  }
 });
 
 // ==============================================================
