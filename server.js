@@ -5252,7 +5252,7 @@ app.post('/api/eventos', async (req, res) => {
 });
 
 // ============================================================================
-// 3. Importar Planilha e Abrir Salão (VERSÃO DEFINITIVA)
+// 3. Importar Planilha e Abrir Salão (CORRIGIDA)
 // ============================================================================
 app.post('/api/eventos/:id/importar', async (req, res) => {
   try {
@@ -5271,7 +5271,6 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
 
     if (!turnoAtual) return res.status(400).json({ error: "É necessário ter um Turno de Caixa aberto no salão para gerar as comandas!" });
 
-    // 🛡️ BUSCA TUDO QUE JÁ ESTÁ ABERTO PARA EVITAR DUPLICAÇÃO
     const abertas = await prisma.restaurantTab.findMany({
       where: { lojaId: loja.id, shiftId: turnoAtual.id, status: 'OPEN' }
     });
@@ -5280,7 +5279,6 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
 
     let importadosCount = 0;
     let errosCount = 0;
-    let erroDetails = "";
 
     for (const row of convidados) {
       try {
@@ -5290,13 +5288,11 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
         const comandaNum = row.comandaIndicada ? Number(String(row.comandaIndicada).replace(/\D/g, '')) : null;
         const mesaNum = row.mesaIndicada ? Number(String(row.mesaIndicada).replace(/\D/g, '')) : null;
 
-        // 🚨 VALIDAÇÃO: Impede comandas iguais no mesmo dia
         if (comandaNum && comandasEmUso.includes(comandaNum)) {
-          erroDetails = `Comanda ${comandaNum} já está em uso!`;
-          throw new Error(erroDetails);
+          throw new Error(`Comanda ${comandaNum} já está em uso!`);
         }
 
-        // 1. Cadastrar Cliente
+        // 1. Cadastrar ou Encontrar Cliente
         let clienteSalvo = null;
         if (cleanCpf && cleanCpf.length > 0) {
           clienteSalvo = await prisma.user.findFirst({ where: { cpf: cleanCpf, lojaId: loja.id } });
@@ -5307,7 +5303,7 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
           }
         }
 
-        // 2. 🪑 CRIAR A MESA FÍSICA SE ELA AINDA NÃO EXISTIR (Para aparecer no Salão)
+        // 2. CRIAR A MESA FÍSICA
         if (mesaNum && !mesasEmUso.includes(mesaNum)) {
           await prisma.restaurantTab.create({
             data: {
@@ -5315,16 +5311,18 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
               openedBy: 'Recepção (Evento)', shiftId: turnoAtual.id, eventoId: evento.id
             }
           });
-          mesasEmUso.push(mesaNum); // Adiciona na memória para não criar a mesa de novo no próximo convidado
+          mesasEmUso.push(mesaNum); 
         }
 
-        // 3. CRIAR A COMANDA INDIVIDUAL
+        // 3. CRIAR A COMANDA INDIVIDUAL (AGORA COM CLIENT ID)
         let novaTab = null;
         if (comandaNum) {
           novaTab = await prisma.restaurantTab.create({
             data: {
               lojaId: loja.id, number: comandaNum, type: 'TAB', status: 'OPEN',
-              customerName: row.nome, customerCpf: cleanCpf,
+              customerName: row.nome, 
+              customerCpf: cleanCpf,
+              clientId: clienteSalvo ? clienteSalvo.id : null, // 🔥 O SEGREDO ESTÁ AQUI!
               linkedTable: mesaNum || null, seatLabel: row.posicaoMesa || 'Convidado VIP',
               openedBy: 'Recepção (Evento)', shiftId: turnoAtual.id, eventoId: evento.id
             }
@@ -5342,7 +5340,6 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
         });
         importadosCount++;
       } catch (rowError) {
-        console.error(`Erro ao importar o convidado [${row.nome}]:`, rowError.message);
         errosCount++;
       }
     }
@@ -5354,7 +5351,6 @@ app.post('/api/eventos/:id/importar', async (req, res) => {
     res.status(500).json({ error: "Erro interno ao processar a planilha." });
   }
 });
-
 // 4. Check-in na Porta (Quando o cliente chega)
 app.put('/api/eventos/convidado/:id/checkin', async (req, res) => {
   try {
