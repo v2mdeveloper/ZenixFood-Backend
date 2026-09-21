@@ -89,6 +89,55 @@ model Loja {
   adminUserId        String?
   adminUser          AdminUser? @relation(fields: [adminUserId], references: [id])
   eventos            EventoReserva[]
+  
+  fornecedores       Fornecedor[]
+}
+
+model Fornecedor {
+  id                 String   @id @default(uuid())
+  lojaId             String
+  loja               Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+
+  // Dados Básicos e de Identificação
+  tipoPessoa         String   @default("JURIDICA") // "FISICA" ou "JURIDICA"
+  documento          String   // CPF ou CNPJ
+  razaoSocial        String
+  nomeFantasia       String?
+  inscricaoEstadual  String?
+  inscricaoMunicipal String?
+
+  // Endereço
+  cep                String?
+  logradouro         String?
+  numero             String?
+  complemento        String?
+  bairro             String?
+  cidade             String?
+  uf                 String?
+
+  // Contatos
+  responsavel        String?
+  email              String?
+  telefoneFixo       String?
+  celular            String? // WhatsApp
+
+  // Dados Financeiros e Fiscais
+  banco              String?
+  agencia            String?
+  tipoConta          String?
+  numeroConta        String?
+  chavePix           String?
+  condicaoPagamento  String?
+  retencaoImpostos   String?
+
+  // Classificação e Complementares
+  categoria          String?
+  observacoes        String?  @db.Text
+  anexos             Json?    // Para URLs de documentos no futuro
+
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 // ============================================================================

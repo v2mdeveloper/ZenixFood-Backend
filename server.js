@@ -5879,6 +5879,71 @@ app.post('/api/webhooks/keeta', async (req, res) => {
   res.status(200).send("OK");
 });
 
+// ============================================================================
+// MÓDULO DE FORNECEDORES B2B (CADASTRO COMPLETO)
+// ============================================================================
+
+// 1. Listar Fornecedores
+app.get('/api/fornecedores', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const fornecedores = await prisma.fornecedor.findMany({
+      where: { lojaId: loja.id },
+      orderBy: { razaoSocial: 'asc' }
+    });
+    res.json(fornecedores);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar fornecedores." });
+  }
+});
+
+// 2. Criar Novo Fornecedor
+app.post('/api/fornecedores', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const novoFornecedor = await prisma.fornecedor.create({
+      data: {
+        ...req.body,
+        lojaId: loja.id
+      }
+    });
+    res.status(201).json({ success: true, fornecedor: novoFornecedor });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao criar fornecedor." });
+  }
+});
+
+// 3. Atualizar Fornecedor
+app.put('/api/fornecedores/:id', async (req, res) => {
+  try {
+    const atualizado = await prisma.fornecedor.update({
+      where: { id: req.params.id },
+      data: req.body
+    });
+    res.json({ success: true, fornecedor: atualizado });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar fornecedor." });
+  }
+});
+
+// 4. Excluir Fornecedor
+app.delete('/api/fornecedores/:id', async (req, res) => {
+  try {
+    await prisma.fornecedor.delete({
+      where: { id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir fornecedor." });
+  }
+});
+
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () =>
     console.log(`🚀 ZenixFood Server Multi-Tenant rodando na porta ${PORT}`)
