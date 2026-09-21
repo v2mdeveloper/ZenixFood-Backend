@@ -2811,6 +2811,188 @@ app.post("/api/estoque/xml/import", async (req, res) => {
     }
 });
 
+// ============================================================================
+// MÓDULO DE RECEITAS E PREPAROS (SUB-RECEITAS PARA CMV)
+// ============================================================================
+
+// 1. Listar Receitas
+app.get('/api/receitas', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const receitas = await prisma.receita.findMany({
+      where: { lojaId: loja.id },
+      orderBy: { criadoEm: 'desc' }
+    });
+    res.json(receitas);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar receitas" });
+  }
+});
+
+// 2. Salvar Receita e Calcular Novo Custo do Insumo Pronto
+app.post('/api/receitas', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const { nome, preparo, insumoSaidaId, rendimento, itens } = req.body;
+    // itens = array: [{ insumoId, quantity }]
+
+    // 1. Calcula o custo total da panela/receita
+    let custoTotal = 0;
+    for (const item of itens) {
+       const insumo = await prisma.insumo.findUnique({ where: { id: item.insumoId } });
+       if (insumo) {
+           custoTotal += (insumo.cost * item.quantity);
+       }
+    }
+
+    // 2. Descobre o custo por KG/Unidade do item pronto e atualiza no Insumo
+    const custoPorUnidade = Number(rendimento) > 0 ? (custoTotal / Number(rendimento)) : 0;
+    
+    if (insumoSaidaId) {
+        await prisma.insumo.update({
+            where: { id: insumoSaidaId },
+            data: { cost: custoPorUnidade }
+        });
+    }
+
+    // 3. Salva a matemática toda dentro do campo 'ingredientes' em formato seguro
+    const ingredientesJSON = JSON.stringify({
+        insumoSaidaId,
+        rendimento: Number(rendimento),
+        custoTotal,
+        custoPorUnidade,
+        itens
+    });
+
+    const novaReceita = await prisma.receita.create({
+        data: {
+            lojaId: loja.id,
+            nome,
+            preparo: preparo || '',
+            ingredientes: ingredientesJSON
+        }
+    });
+
+    res.json({ success: true, receita: novaReceita });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao salvar receita" });
+  }
+});
+
+// 3. Botão "Produzir": Dá baixa nos crus e entrada no Cozido
+app.post('/api/receitas/:id/produzir', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { multiplicador } = req.body; // Ex: O chef fez 2x a receita
+    const qtyToProduce = Number(multiplicador) || 1;
+
+    const receita = await prisma.receita.findUnique({ where: { id } });
+    if (!receita) return res.status(404).json({ error: "Receita não encontrada" });
+
+    const dados = JSON.parse(receita.ingredientes);
+    if (!dados.insumoSaidaId) return res.status(400).json({ error: "Esta receita não tem Insumo de Saída vinculado." });
+
+    const txOps = [];
+
+    // 1. Dar BAIXA nos ingredientes crus (Óleo, Arroz Cru, Sal)
+    for (const item of dados.itens) {
+        const qtyDescontar = item.quantity * qtyToProduce;
+        txOps.push(
+            prisma.insumo.update({
+                where: { id: item.insumoId },
+                data: { stock: { decrement: qtyDescontar } }
+            })
+        );
+        txOps.push(
+            prisma.movimentacaoEstoque.create({
+                data: {
+                    lojaId: receita.lojaId,
+                    insumoId: item.insumoId,
+                    type: 'OUT',
+                    quantity: qtyDescontar,
+                    reason: `Produção: ${receita.nome}`
+                }
+            })
+        );
+    }
+
+    // 2. Dar ENTRADA no insumo produzido (Arroz Cozido)
+    const qtyProduzida = dados.rendimento * qtyToProduce;
+    txOps.push(
+        prisma.insumo.update({
+            where: { id: dados.insumoSaidaId },
+            data: { stock: { increment: qtyProduzida } }
+        })
+    );
+    txOps.push(
+        prisma.movimentacaoEstoque.create({
+            data: {
+                lojaId: receita.lojaId,
+                insumoId: dados.insumoSaidaId,
+                type: 'IN',
+                quantity: qtyProduzida,
+                reason: `Produzido (Rendimento): ${receita.nome}`
+            }
+        })
+    );
+
+    // Executa tudo no banco de dados de uma vez (Segurança)
+    await prisma.$transaction(txOps);
+
+    res.json({ success: true, message: "Produção registrada com sucesso!" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao processar a produção da receita" });
+  }
+});
+
+// 4. Excluir Receita
+app.delete('/api/receitas/:id', async (req, res) => {
+    try {
+        await prisma.receita.delete({ where: { id: req.params.id } });
+        res.json({ success: true });
+    } catch(e) {
+        res.status(500).json({ error: "Erro ao excluir" });
+    }
+});
+
+// 5. Atualizar/Editar Receita (E Habilitar/Desabilitar)
+app.put('/api/receitas/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, preparo, insumoSaidaId, rendimento, itens, isActive } = req.body;
+
+    let custoTotal = 0;
+    for (const item of itens) {
+       const insumo = await prisma.insumo.findUnique({ where: { id: item.insumoId } });
+       if (insumo) custoTotal += (insumo.cost * item.quantity);
+    }
+    const custoPorUnidade = Number(rendimento) > 0 ? (custoTotal / Number(rendimento)) : 0;
+    
+    if (insumoSaidaId && isActive !== false) {
+        await prisma.insumo.update({ where: { id: insumoSaidaId }, data: { cost: custoPorUnidade } });
+    }
+
+    const ingredientesJSON = JSON.stringify({ insumoSaidaId, rendimento: Number(rendimento), custoTotal, custoPorUnidade, itens, isActive });
+
+    const receitaAtualizada = await prisma.receita.update({
+        where: { id },
+        data: { nome, preparo: preparo || '', ingredientes: ingredientesJSON }
+    });
+
+    res.json({ success: true, receita: receitaAtualizada });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao atualizar receita" });
+  }
+});
+
 // ==============================================================
 // CONSELHEIRO IA - ANÁLISE DE LUCROS E ESTOQUE
 // ==============================================================
