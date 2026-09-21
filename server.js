@@ -5807,6 +5807,78 @@ app.post('/api/mobile-pos/movimento', async (req, res) => {
   }
 });
 
+// ============================================================================
+// MÓDULO DE INTEGRAÇÕES DE DELIVERY (iFood, 99Food, Keeta)
+// ============================================================================
+
+// 1. Buscar Configurações de Integração
+app.get('/api/integrations', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const config = await prisma.systemConfig.findUnique({
+      where: { key_lojaId: { key: "integracoes_delivery", lojaId: loja.id } }
+    });
+
+    const defaultData = {
+      ifood: { active: false, clientId: '', clientSecret: '', merchantId: '' },
+      food99: { active: false, appId: '', appSecret: '', shopId: '' },
+      keeta: { active: false, developerId: '', developerSecret: '', storeId: '' }
+    };
+
+    res.json(config ? JSON.parse(config.data) : defaultData);
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao buscar integrações." });
+  }
+});
+
+// 2. Salvar Configurações de Integração
+app.post('/api/integrations', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const integrationsData = req.body; // Recebe o objeto com ifood, food99, keeta
+
+    await prisma.systemConfig.upsert({
+      where: { key_lojaId: { key: "integracoes_delivery", lojaId: loja.id } },
+      update: { data: JSON.stringify(integrationsData) },
+      create: {
+        lojaId: loja.id,
+        key: "integracoes_delivery",
+        data: JSON.stringify(integrationsData)
+      }
+    });
+
+    res.json({ success: true, message: "Integrações salvas com sucesso!" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao salvar integrações." });
+  }
+});
+
+// ============================================================================
+// WEBHOOKS (Recepção de Pedidos das Plataformas) - Preparação Futura
+// ============================================================================
+
+app.post('/api/webhooks/ifood', async (req, res) => {
+  // O iFood manda os eventos para cá (Novo Pedido, Cancelamento, etc)
+  console.log("Recebido evento do iFood:", req.body);
+  res.status(200).send("OK");
+});
+
+app.post('/api/webhooks/99food', async (req, res) => {
+  console.log("Recebido evento do 99Food:", req.body);
+  res.status(200).send("OK");
+});
+
+app.post('/api/webhooks/keeta', async (req, res) => {
+  console.log("Recebido evento do Keeta:", req.body);
+  res.status(200).send("OK");
+});
+
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () =>
     console.log(`🚀 ZenixFood Server Multi-Tenant rodando na porta ${PORT}`)
