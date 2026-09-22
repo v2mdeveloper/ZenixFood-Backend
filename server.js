@@ -6053,7 +6053,6 @@ app.get('/api/fiscal/certificado/status', async (req, res) => {
 // MOTOR FISCAL NATIVO: CONSTRUTOR DE XML E CHAVE DE ACESSO (SEFAZ)
 // ============================================================================
 const { create } = require('xmlbuilder2');
-const crypto = require('crypto');
 
 // 1. Função Matemática para o Dígito Verificador (Módulo 11 da SEFAZ)
 function calcularDigitoVerificador(chave43) {
@@ -6472,7 +6471,6 @@ async function enviarParaSefaz(xmlAssinado, fiscalConfig, estado = 'SP') {
 // ============================================================================
 // MAESTRO FISCAL: ROTA INTELIGENTE DE EMISSÃO (SEFAZ NATIVA vs FOCUS)
 // ============================================================================
-const axios = require('axios');
 const https = require('https');
 
 app.post('/api/fiscal/emitir/:orderId', async (req, res) => {
