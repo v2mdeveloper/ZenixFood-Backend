@@ -6471,7 +6471,6 @@ async function enviarParaSefaz(xmlAssinado, fiscalConfig, estado = 'SP') {
 // ============================================================================
 // MAESTRO FISCAL: ROTA INTELIGENTE DE EMISSÃO (SEFAZ NATIVA vs FOCUS)
 // ============================================================================
-const https = require('https');
 
 app.post('/api/fiscal/emitir/:orderId', async (req, res) => {
   try {
