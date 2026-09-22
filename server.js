@@ -6102,12 +6102,12 @@ function gerarURLQRCode(chaveAcesso, ambiente, cscId, cscSecret, estado = 'SP') 
   return { qrCodeStr, urlChave: urlBase };
 }
 
-// 4. O Construtor Oficial do XML da NFC-e (Padrão 4.00)
+// 4. O Construtor Oficial do XML da NFC-e (Padrão 4.00 com Tributação Dinâmica)
 function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
   const dataAtual = new Date();
   
-  // Dados Básicos Fixos
-  const cUF = "35"; // TODO: Tornar dinâmico baseado no endereço da loja (35=SP, 52=GO)
+  // Dados Básicos
+  const cUF = "35"; // SP
   const tpAmb = fiscalConfig.ambienteSefaz || "2"; 
   const serie = 1;
   const cNF = Math.floor(Math.random() * 99999999); 
@@ -6116,163 +6116,221 @@ function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
   const chaveAcesso = gerarChaveAcesso(cUF, dataAtual, fiscalConfig.cnpjLoja, serie, numeroNF, tpEmis, cNF);
   const cDV = chaveAcesso.slice(-1);
 
-  // Inicia a montagem do XML (Padrão ABRASF 4.00)
+  // Lê as regras tributárias do banco de dados
+  const regras = JSON.parse(fiscalConfig.regras || '[]');
+  const icmsList = JSON.parse(fiscalConfig.icms || '[]');
+  const pisCofinsList = JSON.parse(fiscalConfig.pisCofins || '[]');
+
   const xmlObj = create({ version: '1.0', encoding: 'UTF-8' })
     .ele('NFe', { xmlns: 'http://www.portalfiscal.inf.br/nfe' })
       .ele('infNFe', { Id: `NFe${chaveAcesso}`, versao: '4.00' })
         
-        // --- IDENTIFICAÇÃO DA NOTA (ide) ---
         .ele('ide')
-          .ele('cUF').txt(cUF).up()
-          .ele('cNF').txt(String(cNF).padStart(8, '0')).up()
-          .ele('natOp').txt('Venda de Mercadoria').up()
-          .ele('mod').txt('65').up() 
-          .ele('serie').txt(String(serie)).up()
-          .ele('nNF').txt(String(numeroNF)).up()
+          .ele('cUF').txt(cUF).up().ele('cNF').txt(String(cNF).padStart(8, '0')).up().ele('natOp').txt('Venda de Mercadoria').up()
+          .ele('mod').txt('65').up().ele('serie').txt(String(serie)).up().ele('nNF').txt(String(numeroNF)).up()
           .ele('dhEmi').txt(dataAtual.toISOString().split('.')[0] + '-03:00').up() 
-          .ele('tpNF').txt('1').up() 
-          .ele('idDest').txt('1').up() 
-          .ele('cMunFG').txt('3550308').up() 
-          .ele('tpImp').txt('4').up() 
-          .ele('tpEmis').txt(tpEmis).up()
-          .ele('cDV').txt(String(cDV)).up()
-          .ele('tpAmb').txt(tpAmb).up()
-          .ele('finNFe').txt('1').up() 
-          .ele('indFinal').txt('1').up() 
-          .ele('indPres').txt('1').up() 
-          .ele('procEmi').txt('0').up() 
-          .ele('verProc').txt('ZenixFood-1.0').up()
+          .ele('tpNF').txt('1').up().ele('idDest').txt('1').up().ele('cMunFG').txt('3550308').up() 
+          .ele('tpImp').txt('4').up().ele('tpEmis').txt(tpEmis).up().ele('cDV').txt(String(cDV)).up()
+          .ele('tpAmb').txt(tpAmb).up().ele('finNFe').txt('1').up().ele('indFinal').txt('1').up() 
+          .ele('indPres').txt('1').up().ele('procEmi').txt('0').up().ele('verProc').txt('ZenixFood-1.0').up()
         .up()
 
-        // --- EMITENTE (emit) ---
         .ele('emit')
           .ele('CNPJ').txt(fiscalConfig.cnpjLoja.replace(/\D/g, '')).up()
           .ele('xNome').txt(loja.razaoSocial).up()
           .ele('xFant').txt(loja.nomeFantasia || loja.razaoSocial).up()
           .ele('enderEmit')
              .ele('xLgr').txt(loja.endereco?.split(',')[0] || 'Rua Principal').up()
-             .ele('nro').txt('123').up() 
-             .ele('xBairro').txt('Centro').up()
-             .ele('cMun').txt('3550308').up() 
-             .ele('xMun').txt('SAO PAULO').up()
-             .ele('UF').txt('SP').up()
-             .ele('CEP').txt('01001000').up()
+             .ele('nro').txt('123').up().ele('xBairro').txt('Centro').up().ele('cMun').txt('3550308').up() 
+             .ele('xMun').txt('SAO PAULO').up().ele('UF').txt('SP').up().ele('CEP').txt('01001000').up()
           .up()
           .ele('IE').txt(loja.inscricaoEstadual?.replace(/\D/g, '') || '').up()
           .ele('CRT').txt('1').up() 
         .up();
 
-        // --- DESTINATÁRIO (dest) ---
         if (pedido.client && pedido.client.cpf) {
           const cpfLimpo = pedido.client.cpf.replace(/\D/g, '');
           if (cpfLimpo.length === 11) {
-            xmlObj.ele('dest')
-              .ele('CPF').txt(cpfLimpo).up()
-              .ele('xNome').txt(pedido.client.name).up()
-              .ele('indIEDest').txt('9').up()
-            .up();
+            xmlObj.ele('dest').ele('CPF').txt(cpfLimpo).up().ele('xNome').txt(pedido.client.name).up().ele('indIEDest').txt('9').up().up();
           }
         }
 
-        // --- PRODUTOS (det) ---
         let totalNota = 0;
         pedido.items.forEach((item, index) => {
           const vItem = Number(item.price) * item.quantity;
           totalNota += vItem;
 
+          // ==========================================================
+          // A MÁGICA DA TRIBUTAÇÃO DINÂMICA
+          // ==========================================================
           const ncm = item.product.ncm || '21069090'; 
-          const cfop = '5102'; 
+          let cfop = '5102'; 
+          let cstIcms = '102'; let cstPis = '49'; let cstCofins = '49';
+
+          // Tenta encontrar a regra do produto. Se não tiver, usa a primeira regra cadastrada como padrão
+          const regraProduto = regras.find(r => r.id === item.product.regraFiscalId) || regras[0];
+          
+          if (regraProduto) {
+             const rIcms = icmsList.find(i => i.id === regraProduto.icmsId);
+             const rPis = pisCofinsList.find(p => p.id === regraProduto.pisCofinsId);
+             if (rIcms) { cfop = rIcms.cfop || '5102'; cstIcms = rIcms.cst || '102'; }
+             if (rPis) { cstPis = rPis.cstPis || '49'; cstCofins = rPis.cstCofins || '49'; }
+          }
           
           xmlObj.ele('det', { nItem: index + 1 })
             .ele('prod')
               .ele('cProd').txt(item.productId.substring(0, 10)).up()
-              .ele('cEAN').txt('SEM GTIN').up()
-              .ele('xProd').txt(item.product.name).up()
-              .ele('NCM').txt(ncm.replace(/\D/g, '')).up()
-              .ele('CFOP').txt(cfop).up()
-              .ele('uCom').txt('UN').up()
-              .ele('qCom').txt(item.quantity.toFixed(4)).up()
-              .ele('vUnCom').txt(Number(item.price).toFixed(4)).up()
-              .ele('vProd').txt(vItem.toFixed(2)).up()
-              .ele('cEANTrib').txt('SEM GTIN').up()
-              .ele('uTrib').txt('UN').up()
-              .ele('qTrib').txt(item.quantity.toFixed(4)).up()
-              .ele('vUnTrib').txt(Number(item.price).toFixed(4)).up()
+              .ele('cEAN').txt('SEM GTIN').up().ele('xProd').txt(item.product.name).up()
+              .ele('NCM').txt(ncm.replace(/\D/g, '')).up().ele('CFOP').txt(cfop).up()
+              .ele('uCom').txt('UN').up().ele('qCom').txt(item.quantity.toFixed(4)).up()
+              .ele('vUnCom').txt(Number(item.price).toFixed(4)).up().ele('vProd').txt(vItem.toFixed(2)).up()
+              .ele('cEANTrib').txt('SEM GTIN').up().ele('uTrib').txt('UN').up()
+              .ele('qTrib').txt(item.quantity.toFixed(4)).up().ele('vUnTrib').txt(Number(item.price).toFixed(4)).up()
               .ele('indTot').txt('1').up()
             .up()
             .ele('imposto')
               .ele('ICMS')
-                .ele('ICMSSN102') 
+                .ele(`ICMSSN${cstIcms}`) // Monta dinamicamente a tag (ex: ICMSSN102, ICMSSN500)
                   .ele('orig').txt('0').up()
-                  .ele('CSOSN').txt('102').up()
+                  .ele('CSOSN').txt(cstIcms).up()
                 .up()
               .up()
-              .ele('PIS')
-                .ele('PISNT')
-                  .ele('CST').txt('49').up()
-                .up()
-              .up()
-              .ele('COFINS')
-                .ele('COFINSNT')
-                  .ele('CST').txt('49').up()
-                .up()
-              .up()
+              .ele('PIS').ele('PISNT').ele('CST').txt(cstPis).up().up().up()
+              .ele('COFINS').ele('COFINSNT').ele('CST').txt(cstCofins).up().up().up()
             .up()
           .up(); 
         });
 
-        // --- TOTAIS (total) ---
         xmlObj.ele('total')
           .ele('ICMSTot')
-            .ele('vBC').txt('0.00').up()
-            .ele('vICMS').txt('0.00').up()
-            .ele('vICMSDeson').txt('0.00').up()
-            .ele('vFCP').txt('0.00').up()
-            .ele('vBCST').txt('0.00').up()
-            .ele('vST').txt('0.00').up()
-            .ele('vFCPST').txt('0.00').up()
-            .ele('vFCPSTRet').txt('0.00').up()
+            .ele('vBC').txt('0.00').up().ele('vICMS').txt('0.00').up().ele('vICMSDeson').txt('0.00').up().ele('vFCP').txt('0.00').up().ele('vBCST').txt('0.00').up().ele('vST').txt('0.00').up().ele('vFCPST').txt('0.00').up().ele('vFCPSTRet').txt('0.00').up()
             .ele('vProd').txt(totalNota.toFixed(2)).up()
-            .ele('vFrete').txt('0.00').up()
-            .ele('vSeg').txt('0.00').up()
-            .ele('vDesc').txt('0.00').up()
-            .ele('vII').txt('0.00').up()
-            .ele('vIPI').txt('0.00').up()
-            .ele('vIPIDevol').txt('0.00').up()
-            .ele('vPIS').txt('0.00').up()
-            .ele('vCOFINS').txt('0.00').up()
-            .ele('vOutro').txt('0.00').up()
+            .ele('vFrete').txt('0.00').up().ele('vSeg').txt('0.00').up().ele('vDesc').txt('0.00').up().ele('vII').txt('0.00').up().ele('vIPI').txt('0.00').up().ele('vIPIDevol').txt('0.00').up().ele('vPIS').txt('0.00').up().ele('vCOFINS').txt('0.00').up().ele('vOutro').txt('0.00').up()
             .ele('vNF').txt(totalNota.toFixed(2)).up()
           .up()
         .up()
 
-        // --- PAGAMENTO (pag) ---
         .ele('pag')
           .ele('detPag')
             .ele('tPag').txt('01').up() 
             .ele('vPag').txt(totalNota.toFixed(2)).up()
           .up()
         .up()
-      .up(); // Fecha <infNFe>
+      .up();
 
-  // ==========================================
-  // INJEÇÃO DO QR CODE (Suplemento da Nota)
-  // ==========================================
   if (fiscalConfig.cscId && fiscalConfig.cscSecret) {
     const { qrCodeStr, urlChave } = gerarURLQRCode(chaveAcesso, tpAmb, fiscalConfig.cscId, fiscalConfig.cscSecret, 'SP');
-    
-    xmlObj.ele('infNFeSupl')
-      .ele('qrCode').txt(`<![CDATA[${qrCodeStr}]]>`).up()
-      .ele('urlChave').txt(urlChave).up()
-    .up();
+    xmlObj.ele('infNFeSupl').ele('qrCode').txt(`<![CDATA[${qrCodeStr}]]>`).up().ele('urlChave').txt(urlChave).up().up();
   }
 
-  // Finaliza a string e limpa erros de escape no CDATA
   const xmlFinal = xmlObj.end({ prettyPrint: false });
   const xmlLimpo = xmlFinal.replace(/&lt;!\[CDATA\[/g, '<![CDATA[').replace(/\]\]&gt;/g, ']]>');
   
   return { xmlBruto: xmlLimpo, chaveAcesso: chaveAcesso };
 }
+
+// ============================================================================
+// MOTOR FISCAL NATIVO: CANCELAMENTO DE NOTA (EVENTO SEFAZ)
+// ============================================================================
+
+function construirXmlCancelamento(chave, protocolo, justificativa, cnpj, ambiente, cUF) {
+  const dataEvento = new Date().toISOString().split('.')[0] + '-03:00';
+  
+  const xmlObj = create({ version: '1.0', encoding: 'UTF-8' })
+    .ele('envEvento', { versao: '1.00', xmlns: 'http://www.portalfiscal.inf.br/nfe' })
+      .ele('idLote').txt('1').up()
+      .ele('evento', { versao: '1.00' })
+        .ele('infEvento', { Id: `ID110111${chave}01` }) // 110111 = Cancelamento, 01 = SeqEvento
+          .ele('cOrgao').txt(cUF).up()
+          .ele('tpAmb').txt(ambiente).up()
+          .ele('CNPJ').txt(cnpj.replace(/\D/g, '')).up()
+          .ele('chNFe').txt(chave).up()
+          .ele('dhEvento').txt(dataEvento).up()
+          .ele('tpEvento').txt('110111').up()
+          .ele('nSeqEvento').txt('1').up()
+          .ele('verEvento').txt('1.00').up()
+          .ele('detEvento', { versao: '1.00' })
+            .ele('descEvento').txt('Cancelamento').up()
+            .ele('nProt').txt(protocolo).up()
+            .ele('xJust').txt(justificativa).up()
+          .up()
+        .up()
+      .up()
+    .up();
+
+  return xmlObj.end({ prettyPrint: false });
+}
+
+// ROTA DE CANCELAMENTO
+app.post('/api/fiscal/cancelar/:orderId', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { orderId } = req.params;
+    const { justificativa } = req.body;
+
+    if (!justificativa || justificativa.length < 15) {
+       return res.status(400).json({ error: "A justificativa deve ter no mínimo 15 caracteres." });
+    }
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    const fiscalConfig = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    const pedido = await prisma.order.findUnique({ where: { id: orderId } });
+
+    if (!fiscalConfig || !fiscalConfig.certificadoA1Base64) return res.status(400).json({ error: "Certificado não configurado." });
+    if (!pedido || !pedido.nfceData) return res.status(400).json({ error: "Nota não encontrada para cancelamento." });
+
+    const notaData = JSON.parse(pedido.nfceData);
+    if (notaData.status === "CANCELADA") return res.status(400).json({ error: "Esta nota já foi cancelada." });
+
+    const cUF = '35'; // SP
+    const ambiente = fiscalConfig.ambienteSefaz || '2';
+    
+    // 1. Constrói e Assina o Evento
+    const xmlCancelamentoBruto = construirXmlCancelamento(notaData.chave, notaData.protocolo, justificativa, fiscalConfig.cnpjLoja, ambiente, cUF);
+    
+    const { chavePrivadaPem, certificadoPem } = extrairCertificado(fiscalConfig.certificadoA1Base64, fiscalConfig.senhaCertificado);
+    
+    // O node-xml-crypto precisa apontar exatamente para o infEvento
+    const sig = new SignedXml();
+    sig.addReference("//*[local-name(.)='infEvento']", ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"], "http://www.w3.org/2001/04/xmlenc#sha256");
+    sig.signingKey = chavePrivadaPem;
+    sig.signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+    sig.keyInfoProvider = { getKeyInfo: (k, p) => `<${p?p+':':''}X509Data><${p?p+':':''}X509Certificate>${certificadoPem.replace(/-----(.*?)-----|\r?\n|\r/g, '')}</${p?p+':':''}X509Certificate></${p?p+':':''}X509Data>` };
+    
+    sig.computeSignature(xmlCancelamentoBruto);
+    const xmlAssinado = sig.getSignedXml();
+
+    // 2. Transmite usando o mTLS
+    const urlCancelamento = ambiente === '1' ? 'https://nfce.fazenda.sp.gov.br/ws/RecepcaoEvento4.asmx' : 'https://nfcehomolog.fazenda.sp.gov.br/ws/RecepcaoEvento4.asmx';
+    
+    // O Envelope de Cancelamento é ligeiramente diferente do de Autorização
+    const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Header><nfeCabecMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><cUF>${cUF}</cUF><versaoDados>1.00</versaoDados></nfeCabecMsg></soap12:Header><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4">${xmlAssinado}</nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+
+    const pfxBuffer = Buffer.from(fiscalConfig.certificadoA1Base64, 'base64');
+    const httpsAgent = new https.Agent({ pfx: pfxBuffer, passphrase: fiscalConfig.senhaCertificado, rejectUnauthorized: false });
+
+    const respostaSefaz = await axios.post(urlCancelamento, soapEnvelope, {
+      headers: { 'Content-Type': 'application/soap+xml; charset=utf-8' }, httpsAgent
+    });
+
+    const isCancelado = respostaSefaz.data.includes('<cStat>135</cStat>'); // 135 = Evento registrado e vinculado
+
+    if (isCancelado) {
+       notaData.status = "CANCELADA";
+       notaData.dataCancelamento = new Date().toISOString();
+       await prisma.order.update({ where: { id: pedido.id }, data: { nfceData: JSON.stringify(notaData) } });
+       
+       res.json({ success: true, message: "NFC-e Cancelada com Sucesso!" });
+    } else {
+       const match = respostaSefaz.data.match(/<xMotivo>(.*?)<\/xMotivo>/);
+       throw new Error(`Erro SEFAZ: ${match ? match[1] : 'Rejeição'}`);
+    }
+
+  } catch (error) {
+    console.error("[CANCELAMENTO]", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 
 // ============================================================================
