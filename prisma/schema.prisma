@@ -451,12 +451,19 @@ model Settings {
 }
 
 model FiscalConfig {
-  id        String @id @default(cuid())
-  lojaId    String
-  loja      Loja   @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  icms      Json?  @default("[]")
-  pisCofins Json?  @default("[]")
-  regras    Json?  @default("[]")
+  id                  String   @id @default(cuid())
+  lojaId              String
+  loja                Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  icms                Json?    @default("[]")
+  pisCofins           Json?    @default("[]")
+  regras              Json?    @default("[]")
+  
+  //CAMPOS DO MOTOR FISCAL NATIVO (COFRE)
+  certificadoA1Base64 String?  @db.Text
+  senhaCertificado    String? 
+  ambienteSefaz       String   @default("2") // 1 = Produção, 2 = Homologação
+  cscId               String?
+  cscSecret           String?
 }
 
 model AccessLog {

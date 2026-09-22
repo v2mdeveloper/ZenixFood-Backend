@@ -4940,6 +4940,106 @@ app.post("/api/admin/orders/:id/fiscal", async (req, res) => {
     }
 });
 
+// ============================================================================
+// MOTOR FISCAL NATIVO: GESTÃO DE CERTIFICADO A1 E CSC
+// ============================================================================
+
+// 1. Upload do Certificado A1 (.pfx)
+app.post('/api/fiscal/certificado', upload.single('certificado'), async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { senha } = req.body;
+    
+    if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    if (!senha) return res.status(400).json({ error: "A senha do certificado é obrigatória." });
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    // Converte o arquivo binário .pfx para Base64
+    const certificadoBase64 = req.file.buffer.toString('base64');
+
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
+      });
+    } else {
+      await prisma.fiscalConfig.create({
+        data: { lojaId: loja.id, certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
+      });
+    }
+
+    res.json({ success: true, message: "Certificado A1 salvo com sucesso!" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao processar o certificado." });
+  }
+});
+
+// 2. Salvar Dados CSC (QR Code da NFC-e)
+app.put('/api/fiscal/csc', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { cscId, cscSecret, ambienteSefaz } = req.body;
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { cscId, cscSecret, ambienteSefaz }
+      });
+    } else {
+      await prisma.fiscalConfig.create({
+        data: { lojaId: loja.id, cscId, cscSecret, ambienteSefaz }
+      });
+    }
+
+    res.json({ success: true, message: "Credenciais SEFAZ atualizadas!" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao salvar CSC." });
+  }
+});
+
+// 3. Deletar Certificado
+app.delete('/api/fiscal/certificado', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { certificadoA1Base64: null, senhaCertificado: null }
+      });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir." });
+  }
+});
+
+// 4. Checar Status
+app.get('/api/fiscal/certificado/status', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config && config.certificadoA1Base64) {
+       res.json({ cadastrado: true });
+    } else {
+       res.json({ cadastrado: false });
+    }
+  } catch (error) { res.json({ cadastrado: false }); }
+});
+
 // Analytics
 app.post("/api/analytics/visit", async (req, res) => {
     try {
