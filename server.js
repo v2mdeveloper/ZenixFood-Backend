@@ -10,6 +10,10 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
 
+const axios = require('axios');
+const https = require('https');
+const crypto = require('crypto');
+
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Em um SaaS maduro, você pode salvar o Access Token do MP na tabela Loja para que cada cliente receba na própria conta.
@@ -4940,106 +4944,6 @@ app.post("/api/admin/orders/:id/fiscal", async (req, res) => {
     }
 });
 
-// ============================================================================
-// MOTOR FISCAL NATIVO: GESTÃO DE CERTIFICADO A1 E CSC
-// ============================================================================
-
-// 1. Upload do Certificado A1 (.pfx)
-app.post('/api/fiscal/certificado', upload.single('certificado'), async (req, res) => {
-  try {
-    const lojaSlug = req.headers['x-loja-slug'];
-    const { senha } = req.body;
-    
-    if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
-    if (!senha) return res.status(400).json({ error: "A senha do certificado é obrigatória." });
-
-    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
-    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
-
-    // Converte o arquivo binário .pfx para Base64
-    const certificadoBase64 = req.file.buffer.toString('base64');
-
-    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
-    
-    if (config) {
-      await prisma.fiscalConfig.update({
-        where: { id: config.id },
-        data: { certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
-      });
-    } else {
-      await prisma.fiscalConfig.create({
-        data: { lojaId: loja.id, certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
-      });
-    }
-
-    res.json({ success: true, message: "Certificado A1 salvo com sucesso!" });
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao processar o certificado." });
-  }
-});
-
-// 2. Salvar Dados CSC (QR Code da NFC-e)
-app.put('/api/fiscal/csc', async (req, res) => {
-  try {
-    const lojaSlug = req.headers['x-loja-slug'];
-    const { cscId, cscSecret, ambienteSefaz } = req.body;
-
-    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
-    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
-
-    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
-    
-    if (config) {
-      await prisma.fiscalConfig.update({
-        where: { id: config.id },
-        data: { cscId, cscSecret, ambienteSefaz }
-      });
-    } else {
-      await prisma.fiscalConfig.create({
-        data: { lojaId: loja.id, cscId, cscSecret, ambienteSefaz }
-      });
-    }
-
-    res.json({ success: true, message: "Credenciais SEFAZ atualizadas!" });
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao salvar CSC." });
-  }
-});
-
-// 3. Deletar Certificado
-app.delete('/api/fiscal/certificado', async (req, res) => {
-  try {
-    const lojaSlug = req.headers['x-loja-slug'];
-    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
-    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
-    
-    if (config) {
-      await prisma.fiscalConfig.update({
-        where: { id: config.id },
-        data: { certificadoA1Base64: null, senhaCertificado: null }
-      });
-    }
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: "Erro ao excluir." });
-  }
-});
-
-// 4. Checar Status
-app.get('/api/fiscal/certificado/status', async (req, res) => {
-  try {
-    const lojaSlug = req.headers['x-loja-slug'];
-    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
-    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
-    
-    if (config && config.certificadoA1Base64) {
-       res.json({ cadastrado: true });
-    } else {
-       res.json({ cadastrado: false });
-    }
-  } catch (error) { res.json({ cadastrado: false }); }
-});
-
 // Analytics
 app.post("/api/analytics/visit", async (req, res) => {
     try {
@@ -6041,6 +5945,418 @@ app.delete('/api/fornecedores/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Erro ao excluir fornecedor." });
+  }
+});
+
+// ============================================================================
+// MOTOR FISCAL NATIVO: GESTÃO DE CERTIFICADO A1 E CSC
+// ============================================================================
+
+// 1. Upload do Certificado A1 (.pfx)
+app.post('/api/fiscal/certificado', upload.single('certificado'), async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { senha } = req.body;
+    
+    if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
+    if (!senha) return res.status(400).json({ error: "A senha do certificado é obrigatória." });
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    // Converte o arquivo binário .pfx para Base64
+    const certificadoBase64 = req.file.buffer.toString('base64');
+
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
+      });
+    } else {
+      await prisma.fiscalConfig.create({
+        data: { lojaId: loja.id, certificadoA1Base64: certificadoBase64, senhaCertificado: senha }
+      });
+    }
+
+    res.json({ success: true, message: "Certificado A1 salvo com sucesso!" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao processar o certificado." });
+  }
+});
+
+// 2. Salvar Dados CSC (QR Code da NFC-e)
+app.put('/api/fiscal/csc', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { cscId, cscSecret, ambienteSefaz } = req.body;
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { cscId, cscSecret, ambienteSefaz }
+      });
+    } else {
+      await prisma.fiscalConfig.create({
+        data: { lojaId: loja.id, cscId, cscSecret, ambienteSefaz }
+      });
+    }
+
+    res.json({ success: true, message: "Credenciais SEFAZ atualizadas!" });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao salvar CSC." });
+  }
+});
+
+// 3. Deletar Certificado
+app.delete('/api/fiscal/certificado', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config) {
+      await prisma.fiscalConfig.update({
+        where: { id: config.id },
+        data: { certificadoA1Base64: null, senhaCertificado: null }
+      });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: "Erro ao excluir." });
+  }
+});
+
+// 4. Checar Status
+app.get('/api/fiscal/certificado/status', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    let config = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    
+    if (config && config.certificadoA1Base64) {
+       res.json({ cadastrado: true });
+    } else {
+       res.json({ cadastrado: false });
+    }
+  } catch (error) { res.json({ cadastrado: false }); }
+});
+
+
+// ============================================================================
+// MOTOR FISCAL NATIVO: CONSTRUTOR DE XML E CHAVE DE ACESSO (SEFAZ)
+// ============================================================================
+const { create } = require('xmlbuilder2');
+
+// 1. Função Matemática para o Dígito Verificador (Módulo 11 da SEFAZ)
+function calcularDigitoVerificador(chave43) {
+  let multiplicadores = [2, 3, 4, 5, 6, 7, 8, 9];
+  let soma = 0;
+  let indexMultiplicador = 0;
+
+  // Multiplica da direita para a esquerda
+  for (let i = chave43.length - 1; i >= 0; i--) {
+    soma += parseInt(chave43[i]) * multiplicadores[indexMultiplicador];
+    indexMultiplicador = (indexMultiplicador + 1) % multiplicadores.length;
+  }
+
+  let resto = soma % 11;
+  return resto === 0 || resto === 1 ? 0 : 11 - resto;
+}
+
+// 2. Gerador da Chave de Acesso de 44 Dígitos
+function gerarChaveAcesso(cUF, dataEmissao, cnpj, serie, numeroNF, tpEmis, cNF) {
+  const anoMes = dataEmissao.toISOString().substring(2, 4) + dataEmissao.toISOString().substring(5, 7);
+  const cnpjLimpo = cnpj.replace(/\D/g, '').padStart(14, '0');
+  const mod = '65'; // 65 = NFC-e
+  const seriePad = String(serie).padStart(3, '0');
+  const numeroPad = String(numeroNF).padStart(9, '0');
+  const cNFPad = String(cNF).padStart(8, '0');
+
+  const chave43 = `${cUF}${anoMes}${cnpjLimpo}${mod}${seriePad}${numeroPad}${tpEmis}${cNFPad}`;
+  const cDV = calcularDigitoVerificador(chave43);
+  
+  return `${chave43}${cDV}`;
+}
+
+// 3. O Construtor do XML da NFC-e
+function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
+  const dataAtual = new Date();
+  
+  // Dados Básicos Fixos
+  const cUF = "35"; // 35 = SP, 52 = GO (Você pode tornar isso dinâmico depois)
+  const tpAmb = fiscalConfig.ambienteSefaz || "2"; // 1=Produção, 2=Homologação
+  const serie = 1;
+  const cNF = Math.floor(Math.random() * 99999999); // Número aleatório para compor a chave
+  const tpEmis = "1"; // 1 = Emissão Normal
+  
+  const chaveAcesso = gerarChaveAcesso(cUF, dataAtual, fiscalConfig.cnpjLoja, serie, numeroNF, tpEmis, cNF);
+  const cDV = chaveAcesso.slice(-1);
+
+  // Inicia a montagem do XML (Padrão ABRASF 4.00)
+  const xmlObj = create({ version: '1.0', encoding: 'UTF-8' })
+    .ele('NFe', { xmlns: 'http://www.portalfiscal.inf.br/nfe' })
+      .ele('infNFe', { Id: `NFe${chaveAcesso}`, versao: '4.00' })
+        
+        // --- 1. IDENTIFICAÇÃO DA NOTA (ide) ---
+        .ele('ide')
+          .ele('cUF').txt(cUF).up()
+          .ele('cNF').txt(String(cNF).padStart(8, '0')).up()
+          .ele('natOp').txt('Venda de Mercadoria').up()
+          .ele('mod').txt('65').up() // 65 = NFC-e
+          .ele('serie').txt(String(serie)).up()
+          .ele('nNF').txt(String(numeroNF)).up()
+          .ele('dhEmi').txt(dataAtual.toISOString().split('.')[0] + '-03:00').up() // Fuso horário de Brasília
+          .ele('tpNF').txt('1').up() // 1 = Saída
+          .ele('idDest').txt('1').up() // 1 = Operação Interna (Dentro do Estado)
+          .ele('cMunFG').txt('3550308').up() // Código IBGE do Município (Ex: SP)
+          .ele('tpImp').txt('4').up() // 4 = DANFE NFC-e
+          .ele('tpEmis').txt(tpEmis).up()
+          .ele('cDV').txt(String(cDV)).up()
+          .ele('tpAmb').txt(tpAmb).up()
+          .ele('finNFe').txt('1').up() // 1 = NF-e Normal
+          .ele('indFinal').txt('1').up() // 1 = Consumidor Final
+          .ele('indPres').txt('1').up() // 1 = Presencial
+          .ele('procEmi').txt('0').up() // 0 = Aplicativo do Contribuinte
+          .ele('verProc').txt('ZenixFood-1.0').up()
+        .up()
+
+        // --- 2. EMITENTE (emit) ---
+        .ele('emit')
+          .ele('CNPJ').txt(fiscalConfig.cnpjLoja.replace(/\D/g, '')).up()
+          .ele('xNome').txt(loja.razaoSocial).up()
+          .ele('xFant').txt(loja.nomeFantasia || loja.razaoSocial).up()
+          .ele('enderEmit')
+             .ele('xLgr').txt(loja.endereco?.split(',')[0] || 'Rua Padrão').up()
+             .ele('nro').txt('123').up() // Precisa ser dinâmico depois
+             .ele('xBairro').txt('Centro').up()
+             .ele('cMun').txt('3550308').up() // IBGE
+             .ele('xMun').txt('SAO PAULO').up()
+             .ele('UF').txt('SP').up()
+             .ele('CEP').txt('01001000').up()
+          .up()
+          .ele('IE').txt(loja.inscricaoEstadual?.replace(/\D/g, '') || '').up()
+          .ele('CRT').txt('1').up() // 1 = Simples Nacional
+        .up();
+
+        // --- 3. DESTINATÁRIO (dest) - NFC-e pode ser anônima ---
+        if (pedido.client && pedido.client.cpf) {
+          const cpfLimpo = pedido.client.cpf.replace(/\D/g, '');
+          if (cpfLimpo.length === 11) {
+            xmlObj.ele('dest')
+              .ele('CPF').txt(cpfLimpo).up()
+              .ele('xNome').txt(pedido.client.name).up()
+              .ele('indIEDest').txt('9').up() // 9 = Não Contribuinte
+            .up();
+          }
+        }
+
+        // --- 4. PRODUTOS (det) ---
+        let totalNota = 0;
+        pedido.items.forEach((item, index) => {
+          const vItem = Number(item.price) * item.quantity;
+          totalNota += vItem;
+
+          // Recupera os impostos do Produto (NCM, Regra Fiscal, etc)
+          const ncm = item.product.ncm || '21069090'; // NCM Genérico Alimentos se faltar
+          const cfop = '5102'; // CFOP Venda Simples Nacional
+          
+          xmlObj.ele('det', { nItem: index + 1 })
+            .ele('prod')
+              .ele('cProd').txt(item.productId.substring(0, 10)).up()
+              .ele('cEAN').txt('SEM GTIN').up()
+              .ele('xProd').txt(item.product.name).up()
+              .ele('NCM').txt(ncm.replace(/\D/g, '')).up()
+              .ele('CFOP').txt(cfop).up()
+              .ele('uCom').txt('UN').up()
+              .ele('qCom').txt(item.quantity.toFixed(4)).up()
+              .ele('vUnCom').txt(Number(item.price).toFixed(4)).up()
+              .ele('vProd').txt(vItem.toFixed(2)).up()
+              .ele('cEANTrib').txt('SEM GTIN').up()
+              .ele('uTrib').txt('UN').up()
+              .ele('qTrib').txt(item.quantity.toFixed(4)).up()
+              .ele('vUnTrib').txt(Number(item.price).toFixed(4)).up()
+              .ele('indTot').txt('1').up()
+            .up()
+            // Impostos (Exemplo Básico Simples Nacional - ICMS CSOSN 102)
+            .ele('imposto')
+              .ele('ICMS')
+                .ele('ICMSSN102') // Substituiremos pela Regra Dinâmica no futuro
+                  .ele('orig').txt('0').up()
+                  .ele('CSOSN').txt('102').up()
+                .up()
+              .up()
+              .ele('PIS')
+                .ele('PISNT')
+                  .ele('CST').txt('49').up()
+                .up()
+              .up()
+              .ele('COFINS')
+                .ele('COFINSNT')
+                  .ele('CST').txt('49').up()
+                .up()
+              .up()
+            .up()
+          .up(); // Fecha det
+        });
+
+        // --- 5. TOTAIS (total) ---
+        xmlObj.ele('total')
+          .ele('ICMSTot')
+            .ele('vBC').txt('0.00').up()
+            .ele('vICMS').txt('0.00').up()
+            .ele('vICMSDeson').txt('0.00').up()
+            .ele('vFCP').txt('0.00').up()
+            .ele('vBCST').txt('0.00').up()
+            .ele('vST').txt('0.00').up()
+            .ele('vFCPST').txt('0.00').up()
+            .ele('vFCPSTRet').txt('0.00').up()
+            .ele('vProd').txt(totalNota.toFixed(2)).up()
+            .ele('vFrete').txt('0.00').up()
+            .ele('vSeg').txt('0.00').up()
+            .ele('vDesc').txt('0.00').up()
+            .ele('vII').txt('0.00').up()
+            .ele('vIPI').txt('0.00').up()
+            .ele('vIPIDevol').txt('0.00').up()
+            .ele('vPIS').txt('0.00').up()
+            .ele('vCOFINS').txt('0.00').up()
+            .ele('vOutro').txt('0.00').up()
+            .ele('vNF').txt(totalNota.toFixed(2)).up()
+          .up()
+        .up()
+
+        // --- 6. PAGAMENTO (pag) ---
+        .ele('pag')
+          .ele('detPag')
+            .ele('tPag').txt('01').up() // 01 = Dinheiro (Faremos o de-para dinâmico depois)
+            .ele('vPag').txt(totalNota.toFixed(2)).up()
+          .up()
+        .up();
+
+  // Fecha o XML e retorna a string bruta
+  const xmlFinal = xmlObj.end({ prettyPrint: false });
+  return { xmlBruto: xmlFinal, chaveAcesso: chaveAcesso };
+}
+
+
+// ============================================================================
+// MOTOR FISCAL NATIVO: ASSINATURA DIGITAL (XMLDSIG)
+// ============================================================================
+const forge = require('node-forge');
+const { SignedXml } = require('xml-crypto');
+
+// 1. Desbloquear o Cofre: Extrair Chave Privada e Certificado do ficheiro .pfx Base64
+function extrairCertificado(pfxBase64, senha) {
+  try {
+    const pfxDer = forge.util.decode64(pfxBase64);
+    const pfxAsn1 = forge.asn1.fromDer(pfxDer);
+    const pfx = forge.pkcs12.pkcs12FromAsn1(pfxAsn1, false, senha);
+
+    let chavePrivadaPem = null;
+    let certificadoPem = null;
+
+    // Percorre os sacos de segurança (safebags) do certificado à procura das chaves
+    for (const safeContents of pfx.safeContents) {
+      for (const safeBag of safeContents.safeBags) {
+        if (safeBag.type === forge.pki.oids.keyBag || safeBag.type === forge.pki.oids.pkcs8ShroudedKeyBag) {
+          const privateKey = safeBag.type === forge.pki.oids.pkcs8ShroudedKeyBag
+            ? forge.pki.decryptPrivateKeyInfo(safeBag.asn1, senha)
+            : forge.pki.privateKeyFromAsn1(safeBag.asn1);
+          chavePrivadaPem = forge.pki.privateKeyToPem(privateKey);
+        } else if (safeBag.type === forge.pki.oids.certBag) {
+          const cert = forge.pki.certificateFromAsn1(safeBag.cert);
+          certificadoPem = forge.pki.certificateToPem(cert);
+        }
+      }
+    }
+
+    if (!chavePrivadaPem || !certificadoPem) {
+      throw new Error("Não foi possível extrair as chaves do PFX.");
+    }
+
+    return { chavePrivadaPem, certificadoPem };
+  } catch (error) {
+    console.error("Erro ao descriptografar PFX:", error);
+    throw new Error("Falha ao abrir o certificado. Verifique a palavra-passe.");
+  }
+}
+
+// 2. Assinar o XML com a Chave Privada (Padrão SEFAZ)
+function assinarXml(xmlBruto, chavePrivadaPem, certificadoPem) {
+  const sig = new SignedXml();
+  
+  // A SEFAZ exige estas referências exatas de encriptação
+  sig.addReference(
+    "//*[local-name(.)='infNFe']",
+    ["http://www.w3.org/2000/09/xmldsig#enveloped-signature", "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"],
+    "http://www.w3.org/2001/04/xmlenc#sha256"
+  );
+  
+  sig.signingKey = chavePrivadaPem;
+  sig.signatureAlgorithm = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+  
+  // Remove os cabeçalhos do PEM para inserir o certificado puro no XML
+  const certLimpo = certificadoPem
+    .replace(/-----BEGIN CERTIFICATE-----/g, '')
+    .replace(/-----END CERTIFICATE-----/g, '')
+    .replace(/\r?\n|\r/g, '');
+
+  sig.keyInfoProvider = {
+    getKeyInfo: function (key, prefix) {
+      const pref = prefix ? prefix + ':' : '';
+      return `<${pref}X509Data><${pref}X509Certificate>${certLimpo}</${pref}X509Certificate></${pref}X509Data>`;
+    }
+  };
+
+  // Calcula o Hash e injeta o bloco <Signature> no ficheiro original
+  sig.computeSignature(xmlBruto);
+  return sig.getSignedXml();
+}
+
+// ============================================================================
+// ROTA DE TESTE: GERAR XML ASSINADO (Apenas para verificar no ecrã)
+// ============================================================================
+app.get('/api/fiscal/teste-assinatura/:orderId', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { orderId } = req.params;
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const fiscalConfig = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    if (!fiscalConfig || !fiscalConfig.certificadoA1Base64) {
+      return res.status(400).json({ error: "Certificado não configurado." });
+    }
+
+    const pedido = await prisma.order.findUnique({
+      where: { id: orderId, lojaId: loja.id },
+      include: { client: true, items: { include: { product: true } } }
+    });
+    if (!pedido) return res.status(404).json({ error: "Pedido não encontrado." });
+
+    // 1. Constrói o XML Bruto
+    const numeroNF = Math.floor(Math.random() * 9999); // Simula o número da nota
+    const { xmlBruto, chaveAcesso } = construirXmlNfce(pedido, loja, fiscalConfig, numeroNF);
+
+    // 2. Extrai as chaves do cofre
+    const { chavePrivadaPem, certificadoPem } = extrairCertificado(fiscalConfig.certificadoA1Base64, fiscalConfig.senhaCertificado);
+
+    // 3. Assina o XML
+    const xmlAssinado = assinarXml(xmlBruto, chavePrivadaPem, certificadoPem);
+
+    // Retorna para visualizarmos a estrutura final encriptada
+    res.type('application/xml').send(xmlAssinado);
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
   }
 });
 
