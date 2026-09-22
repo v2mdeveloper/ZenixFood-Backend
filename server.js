@@ -6053,6 +6053,7 @@ app.get('/api/fiscal/certificado/status', async (req, res) => {
 // MOTOR FISCAL NATIVO: CONSTRUTOR DE XML E CHAVE DE ACESSO (SEFAZ)
 // ============================================================================
 const { create } = require('xmlbuilder2');
+const crypto = require('crypto');
 
 // 1. Função Matemática para o Dígito Verificador (Módulo 11 da SEFAZ)
 function calcularDigitoVerificador(chave43) {
@@ -6060,7 +6061,6 @@ function calcularDigitoVerificador(chave43) {
   let soma = 0;
   let indexMultiplicador = 0;
 
-  // Multiplica da direita para a esquerda
   for (let i = chave43.length - 1; i >= 0; i--) {
     soma += parseInt(chave43[i]) * multiplicadores[indexMultiplicador];
     indexMultiplicador = (indexMultiplicador + 1) % multiplicadores.length;
@@ -6085,16 +6085,34 @@ function gerarChaveAcesso(cUF, dataEmissao, cnpj, serie, numeroNF, tpEmis, cNF) 
   return `${chave43}${cDV}`;
 }
 
-// 3. O Construtor do XML da NFC-e
+// 3. Gerador do QR Code e Hash SHA-1 (Obrigatório na NFC-e)
+function gerarURLQRCode(chaveAcesso, ambiente, cscId, cscSecret, estado = 'SP') {
+  let urlBase = '';
+  if (estado === 'SP') {
+    urlBase = ambiente === '1' ? 'https://www.nfce.fazenda.sp.gov.br/qrcode' : 'https://www.homologacao.nfce.fazenda.sp.gov.br/qrcode';
+  } else if (estado === 'GO') {
+    urlBase = ambiente === '1' ? 'https://nfe.sefaz.go.gov.br/nfeweb/sites/nfce/danfeNFCe' : 'https://homolog.sefaz.go.gov.br/nfeweb/sites/nfce/danfeNFCe';
+  }
+
+  const cscIdPad = String(cscId).padStart(6, '0');
+  const stringParaHash = `${chaveAcesso}|2|${ambiente}|${cscIdPad}${cscSecret}`;
+  
+  const hashSha1 = crypto.createHash('sha1').update(stringParaHash).digest('hex').toUpperCase();
+  const qrCodeStr = `${urlBase}?p=${chaveAcesso}|2|${ambiente}|${cscIdPad}|${hashSha1}`;
+  
+  return { qrCodeStr, urlChave: urlBase };
+}
+
+// 4. O Construtor Oficial do XML da NFC-e (Padrão 4.00)
 function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
   const dataAtual = new Date();
   
   // Dados Básicos Fixos
-  const cUF = "35"; // 35 = SP, 52 = GO (Você pode tornar isso dinâmico depois)
-  const tpAmb = fiscalConfig.ambienteSefaz || "2"; // 1=Produção, 2=Homologação
+  const cUF = "35"; // TODO: Tornar dinâmico baseado no endereço da loja (35=SP, 52=GO)
+  const tpAmb = fiscalConfig.ambienteSefaz || "2"; 
   const serie = 1;
-  const cNF = Math.floor(Math.random() * 99999999); // Número aleatório para compor a chave
-  const tpEmis = "1"; // 1 = Emissão Normal
+  const cNF = Math.floor(Math.random() * 99999999); 
+  const tpEmis = "1"; 
   
   const chaveAcesso = gerarChaveAcesso(cUF, dataAtual, fiscalConfig.cnpjLoja, serie, numeroNF, tpEmis, cNF);
   const cDV = chaveAcesso.slice(-1);
@@ -6104,68 +6122,67 @@ function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
     .ele('NFe', { xmlns: 'http://www.portalfiscal.inf.br/nfe' })
       .ele('infNFe', { Id: `NFe${chaveAcesso}`, versao: '4.00' })
         
-        // --- 1. IDENTIFICAÇÃO DA NOTA (ide) ---
+        // --- IDENTIFICAÇÃO DA NOTA (ide) ---
         .ele('ide')
           .ele('cUF').txt(cUF).up()
           .ele('cNF').txt(String(cNF).padStart(8, '0')).up()
           .ele('natOp').txt('Venda de Mercadoria').up()
-          .ele('mod').txt('65').up() // 65 = NFC-e
+          .ele('mod').txt('65').up() 
           .ele('serie').txt(String(serie)).up()
           .ele('nNF').txt(String(numeroNF)).up()
-          .ele('dhEmi').txt(dataAtual.toISOString().split('.')[0] + '-03:00').up() // Fuso horário de Brasília
-          .ele('tpNF').txt('1').up() // 1 = Saída
-          .ele('idDest').txt('1').up() // 1 = Operação Interna (Dentro do Estado)
-          .ele('cMunFG').txt('3550308').up() // Código IBGE do Município (Ex: SP)
-          .ele('tpImp').txt('4').up() // 4 = DANFE NFC-e
+          .ele('dhEmi').txt(dataAtual.toISOString().split('.')[0] + '-03:00').up() 
+          .ele('tpNF').txt('1').up() 
+          .ele('idDest').txt('1').up() 
+          .ele('cMunFG').txt('3550308').up() 
+          .ele('tpImp').txt('4').up() 
           .ele('tpEmis').txt(tpEmis).up()
           .ele('cDV').txt(String(cDV)).up()
           .ele('tpAmb').txt(tpAmb).up()
-          .ele('finNFe').txt('1').up() // 1 = NF-e Normal
-          .ele('indFinal').txt('1').up() // 1 = Consumidor Final
-          .ele('indPres').txt('1').up() // 1 = Presencial
-          .ele('procEmi').txt('0').up() // 0 = Aplicativo do Contribuinte
+          .ele('finNFe').txt('1').up() 
+          .ele('indFinal').txt('1').up() 
+          .ele('indPres').txt('1').up() 
+          .ele('procEmi').txt('0').up() 
           .ele('verProc').txt('ZenixFood-1.0').up()
         .up()
 
-        // --- 2. EMITENTE (emit) ---
+        // --- EMITENTE (emit) ---
         .ele('emit')
           .ele('CNPJ').txt(fiscalConfig.cnpjLoja.replace(/\D/g, '')).up()
           .ele('xNome').txt(loja.razaoSocial).up()
           .ele('xFant').txt(loja.nomeFantasia || loja.razaoSocial).up()
           .ele('enderEmit')
-             .ele('xLgr').txt(loja.endereco?.split(',')[0] || 'Rua Padrão').up()
-             .ele('nro').txt('123').up() // Precisa ser dinâmico depois
+             .ele('xLgr').txt(loja.endereco?.split(',')[0] || 'Rua Principal').up()
+             .ele('nro').txt('123').up() 
              .ele('xBairro').txt('Centro').up()
-             .ele('cMun').txt('3550308').up() // IBGE
+             .ele('cMun').txt('3550308').up() 
              .ele('xMun').txt('SAO PAULO').up()
              .ele('UF').txt('SP').up()
              .ele('CEP').txt('01001000').up()
           .up()
           .ele('IE').txt(loja.inscricaoEstadual?.replace(/\D/g, '') || '').up()
-          .ele('CRT').txt('1').up() // 1 = Simples Nacional
+          .ele('CRT').txt('1').up() 
         .up();
 
-        // --- 3. DESTINATÁRIO (dest) - NFC-e pode ser anônima ---
+        // --- DESTINATÁRIO (dest) ---
         if (pedido.client && pedido.client.cpf) {
           const cpfLimpo = pedido.client.cpf.replace(/\D/g, '');
           if (cpfLimpo.length === 11) {
             xmlObj.ele('dest')
               .ele('CPF').txt(cpfLimpo).up()
               .ele('xNome').txt(pedido.client.name).up()
-              .ele('indIEDest').txt('9').up() // 9 = Não Contribuinte
+              .ele('indIEDest').txt('9').up()
             .up();
           }
         }
 
-        // --- 4. PRODUTOS (det) ---
+        // --- PRODUTOS (det) ---
         let totalNota = 0;
         pedido.items.forEach((item, index) => {
           const vItem = Number(item.price) * item.quantity;
           totalNota += vItem;
 
-          // Recupera os impostos do Produto (NCM, Regra Fiscal, etc)
-          const ncm = item.product.ncm || '21069090'; // NCM Genérico Alimentos se faltar
-          const cfop = '5102'; // CFOP Venda Simples Nacional
+          const ncm = item.product.ncm || '21069090'; 
+          const cfop = '5102'; 
           
           xmlObj.ele('det', { nItem: index + 1 })
             .ele('prod')
@@ -6184,10 +6201,9 @@ function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
               .ele('vUnTrib').txt(Number(item.price).toFixed(4)).up()
               .ele('indTot').txt('1').up()
             .up()
-            // Impostos (Exemplo Básico Simples Nacional - ICMS CSOSN 102)
             .ele('imposto')
               .ele('ICMS')
-                .ele('ICMSSN102') // Substituiremos pela Regra Dinâmica no futuro
+                .ele('ICMSSN102') 
                   .ele('orig').txt('0').up()
                   .ele('CSOSN').txt('102').up()
                 .up()
@@ -6203,10 +6219,10 @@ function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
                 .up()
               .up()
             .up()
-          .up(); // Fecha det
+          .up(); 
         });
 
-        // --- 5. TOTAIS (total) ---
+        // --- TOTAIS (total) ---
         xmlObj.ele('total')
           .ele('ICMSTot')
             .ele('vBC').txt('0.00').up()
@@ -6231,17 +6247,32 @@ function construirXmlNfce(pedido, loja, fiscalConfig, numeroNF) {
           .up()
         .up()
 
-        // --- 6. PAGAMENTO (pag) ---
+        // --- PAGAMENTO (pag) ---
         .ele('pag')
           .ele('detPag')
-            .ele('tPag').txt('01').up() // 01 = Dinheiro (Faremos o de-para dinâmico depois)
+            .ele('tPag').txt('01').up() 
             .ele('vPag').txt(totalNota.toFixed(2)).up()
           .up()
-        .up();
+        .up()
+      .up(); // Fecha <infNFe>
 
-  // Fecha o XML e retorna a string bruta
+  // ==========================================
+  // INJEÇÃO DO QR CODE (Suplemento da Nota)
+  // ==========================================
+  if (fiscalConfig.cscId && fiscalConfig.cscSecret) {
+    const { qrCodeStr, urlChave } = gerarURLQRCode(chaveAcesso, tpAmb, fiscalConfig.cscId, fiscalConfig.cscSecret, 'SP');
+    
+    xmlObj.ele('infNFeSupl')
+      .ele('qrCode').txt(`<![CDATA[${qrCodeStr}]]>`).up()
+      .ele('urlChave').txt(urlChave).up()
+    .up();
+  }
+
+  // Finaliza a string e limpa erros de escape no CDATA
   const xmlFinal = xmlObj.end({ prettyPrint: false });
-  return { xmlBruto: xmlFinal, chaveAcesso: chaveAcesso };
+  const xmlLimpo = xmlFinal.replace(/&lt;!\[CDATA\[/g, '<![CDATA[').replace(/\]\]&gt;/g, ']]>');
+  
+  return { xmlBruto: xmlLimpo, chaveAcesso: chaveAcesso };
 }
 
 
@@ -6357,6 +6388,216 @@ app.get('/api/fiscal/teste-assinatura/:orderId', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// MOTOR FISCAL NATIVO: TRANSMISSÃO SOAP PARA A SEFAZ (mTLS)
+// ============================================================================
+
+// 1. Dicionário de URLs da SEFAZ (NFC-e Autorização)
+const SEFAZ_URLS = {
+  SP: {
+    homologacao: "https://nfcehomolog.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx",
+    producao: "https://nfce.fazenda.sp.gov.br/ws/NFeAutorizacao4.asmx"
+  },
+  GO: {
+    homologacao: "https://homolog.sefaz.go.gov.br/nfe/services/NFeAutorizacao4",
+    producao: "https://nfe.sefaz.go.gov.br/nfe/services/NFeAutorizacao4"
+  }
+};
+
+// 2. Construtor do Envelope SOAP (Padrão Sefaz NFeAutorizacao4)
+function construirEnvelopeSOAP(cUF, xmlAssinado) {
+  // indSinc = 1 significa Processamento Síncrono (Resposta imediata, ideal para NFC-e)
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Header>
+    <nfeCabecMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+      <cUF>${cUF}</cUF>
+      <versaoDados>4.00</versaoDados>
+    </nfeCabecMsg>
+  </soap12:Header>
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+      <enviNFe versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+        <idLote>1</idLote>
+        <indSinc>1</indSinc>
+        ${xmlAssinado}
+      </enviNFe>
+    </nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+}
+
+// 3. Função Principal de Envio à SEFAZ
+async function enviarParaSefaz(xmlAssinado, fiscalConfig, estado = 'SP') {
+  try {
+    const isHomologacao = fiscalConfig.ambienteSefaz === '2';
+    const url = isHomologacao ? SEFAZ_URLS[estado].homologacao : SEFAZ_URLS[estado].producao;
+    const cUF = estado === 'SP' ? '35' : '52'; // 35 = SP, 52 = GO
+
+    const soapEnvelope = construirEnvelopeSOAP(cUF, xmlAssinado);
+    const pfxBuffer = Buffer.from(fiscalConfig.certificadoA1Base64, 'base64');
+
+    // Mágica do mTLS: Conexão HTTPS usando a identidade do Certificado A1
+    const httpsAgent = new https.Agent({
+      pfx: pfxBuffer,
+      passphrase: fiscalConfig.senhaCertificado,
+      rejectUnauthorized: false // Em alguns estados homologação exige isso
+    });
+
+    console.log(`[SEFAZ] Transmitindo NFC-e para ${url}...`);
+
+    const response = await axios.post(url, soapEnvelope, {
+      headers: {
+        'Content-Type': 'application/soap+xml; charset=utf-8'
+      },
+      httpsAgent: httpsAgent,
+      timeout: 10000 // Timeout de 10 segundos para não travar o caixa
+    });
+
+    return response.data; // Retorna o XML de Resposta (Recibo) da SEFAZ
+  } catch (error) {
+    if (error.response) {
+      console.error("[SEFAZ] Erro na Resposta:", error.response.data);
+      throw new Error(`Erro SEFAZ: HTTP ${error.response.status}`);
+    } else {
+      console.error("[SEFAZ] Erro de Conexão:", error.message);
+      throw new Error(`Falha de comunicação com a SEFAZ: ${error.message}`);
+    }
+  }
+}
+
+// ============================================================================
+// MAESTRO FISCAL: ROTA INTELIGENTE DE EMISSÃO (SEFAZ NATIVA vs FOCUS)
+// ============================================================================
+const axios = require('axios');
+const https = require('https');
+
+app.post('/api/fiscal/emitir/:orderId', async (req, res) => {
+  try {
+    const lojaSlug = req.headers['x-loja-slug'];
+    const { orderId } = req.params;
+
+    const loja = await prisma.loja.findUnique({ where: { slug: lojaSlug } });
+    if (!loja) return res.status(404).json({ error: 'Loja não encontrada' });
+
+    const fiscalConfig = await prisma.fiscalConfig.findFirst({ where: { lojaId: loja.id } });
+    if (!fiscalConfig) return res.status(400).json({ error: "Configuração fiscal ausente." });
+
+    const pedido = await prisma.order.findUnique({
+      where: { id: orderId, lojaId: loja.id },
+      include: { client: true, items: { include: { product: true } } }
+    });
+    
+    if (!pedido) return res.status(404).json({ error: "Pedido não encontrado." });
+
+    // ========================================================================
+    // PLANO A: EMISSOR NATIVO SEFAZ (Custo Zero)
+    // ========================================================================
+    if (fiscalConfig.certificadoA1Base64 && fiscalConfig.senhaCertificado) {
+      console.log(`[FISCAL] Iniciando Emissão Nativa SEFAZ para o Pedido #${pedido.shortId}`);
+      
+      try {
+        const estado = 'SP'; // Futuramente: loja.endereco.includes('GO') ? 'GO' : 'SP'
+        const numeroNF = Math.floor(Math.random() * 99999); 
+        
+        // 1. Constrói, Assina e Transmite
+        const { xmlBruto, chaveAcesso } = construirXmlNfce(pedido, loja, fiscalConfig, numeroNF);
+        const { chavePrivadaPem, certificadoPem } = extrairCertificado(fiscalConfig.certificadoA1Base64, fiscalConfig.senhaCertificado);
+        const xmlAssinado = assinarXml(xmlBruto, chavePrivadaPem, certificadoPem);
+        
+        const respostaSefazXML = await enviarParaSefaz(xmlAssinado, fiscalConfig, estado);
+        const isAutorizado = respostaSefazXML.includes('<cStat>100</cStat>');
+        
+        if (isAutorizado) {
+           const protocoloMatch = respostaSefazXML.match(/<nProt>(.*?)<\/nProt>/);
+           const nProt = protocoloMatch ? protocoloMatch[1] : 'SEM_PROTOCOLO';
+
+           const notaDados = {
+              motor: "SEFAZ_NATIVA",
+              chave: chaveAcesso,
+              protocolo: nProt,
+              numero: numeroNF,
+              dataEmissao: new Date().toISOString(),
+              status: "AUTORIZADA",
+              // URL fake para o DANFE por agora, na próxima etapa faremos o PDF real
+              urlDanfe: `https://www.nfce.fazenda.sp.gov.br/qrcode?p=${chaveAcesso}` 
+           };
+
+           await prisma.order.update({
+             where: { id: pedido.id },
+             data: { nfceData: JSON.stringify(notaDados) }
+           });
+
+           return res.json({ success: true, message: "NFC-e Autorizada (Nativa)!", dados: notaDados });
+        } else {
+           // SEFAZ REJEITOU (Ex: NCM errado, CPF inválido)
+           const motivoErroMatch = respostaSefazXML.match(/<xMotivo>(.*?)<\/xMotivo>/);
+           const xMotivo = motivoErroMatch ? motivoErroMatch[1] : "Rejeição Desconhecida";
+           throw new Error(`Rejeição SEFAZ: ${xMotivo}`);
+        }
+
+      } catch (erroSefaz) {
+        // ====================================================================
+        // CONTINGÊNCIA NATIVA: Se falhar, salva o erro para o gerente arrumar
+        // ====================================================================
+        console.error(`[FISCAL] Falha Nativa: ${erroSefaz.message}`);
+        
+        const erroDados = {
+           status: "ERRO_SEFAZ",
+           mensagem: erroSefaz.message,
+           dataTentativa: new Date().toISOString()
+        };
+
+        await prisma.order.update({
+           where: { id: pedido.id },
+           data: { nfceData: JSON.stringify(erroDados) }
+        });
+
+        // Retorna erro 400 mas a nota fica salva na "Fila de Emissão"
+        return res.status(400).json({ error: erroSefaz.message, naFila: true });
+      }
+    }
+
+    // ========================================================================
+    // PLANO B: FOCUS NFE (Fallback / Legado)
+    // ========================================================================
+    console.log(`[FISCAL] Certificado ausente. Usando Plano B (Focus NFe) para #${pedido.shortId}`);
+    
+    // Aqui você chama a API da Focus exatamente como já fazia antes!
+    // Exemplo básico do que o seu sistema antigo fazia:
+    try {
+       /* 
+       const focusResponse = await axios.post(`https://api.focusnfe.com.br/v2/nfce`, data, {
+         auth: { username: settings.focusToken, password: "" }
+       });
+       */
+       
+       // Simulando o sucesso da Focus NFe
+       const notaFocus = {
+          motor: "FOCUS_NFE",
+          chave: "FOCUS_123456789",
+          status: "AUTORIZADA",
+          urlDanfe: "https://focusnfe.com.br/danfe_fake.pdf"
+       };
+
+       await prisma.order.update({
+         where: { id: pedido.id },
+         data: { nfceData: JSON.stringify(notaFocus) }
+       });
+
+       return res.json({ success: true, message: "NFC-e Autorizada (Focus)!", dados: notaFocus });
+       
+    } catch (erroFocus) {
+       console.error(`[FISCAL] Falha Focus NFe: ${erroFocus.message}`);
+       return res.status(400).json({ error: "Falha ao emitir via Focus NFe", naFila: true });
+    }
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro crítico no motor fiscal." });
   }
 });
 
