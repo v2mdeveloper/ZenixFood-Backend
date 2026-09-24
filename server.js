@@ -1023,68 +1023,26 @@ app.delete("/api/product-groups/:id", async (req, res) => {
 app.get('/api/settings', async (req, res) => {
     try {
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
-        if (!storeSlug) return res.status(400).json({ error: "Slug ausente" });
+        if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        const loja = await prisma.loja.findUnique({
-            where: { slug: storeSlug },
-            include: { settings: true }
-        });
-
+        // Usa findFirst para não quebrar caso existam lojas duplicadas por acidente
+        const loja = await prisma.loja.findFirst({ where: { slug: storeSlug } });
         if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        const configuracoes = loja.settings || {};
+        // Usa findFirst para forçar a leitura da primeira configuração encontrada
+        const configuracoes = await prisma.settings.findFirst({
+            where: { lojaId: loja.id }
+        }) || {};
 
-        //LÓGICA VITAL: VERIFICAR SE A LOJA ESTÁ ABERTA AGORA
-        let isOpen = false;
-        
-        // Se a loja não foi fechada manualmente no botão vermelho do Admin...
-        if (!configuracoes.isManualFechado) {
-            const now = new Date();
-            const currentDay = now.getDay(); // 0 = Domingo, 1 = Segunda...
-            const schedule = configuracoes.schedule || {};
-            const todaySchedule = schedule[currentDay];
-
-            // Se o dia de hoje estiver marcado para abrir na tabela de horários...
-            if (todaySchedule && todaySchedule.isOpen) {
-                const currentTime = now.getHours() * 60 + now.getMinutes(); // Tempo atual em minutos
-                
-                // Converte hora "18:00" em minutos (1080)
-                const parseTime = (timeStr) => {
-                    if (!timeStr) return 0;
-                    const [h, m] = timeStr.split(':').map(Number);
-                    return h * 60 + m;
-                };
-
-                const openTime = parseTime(todaySchedule.open);
-                const closeTime = parseTime(todaySchedule.close);
-
-                // Lógica de horário que atravessa a meia-noite (ex: 18:00 até 02:00)
-                if (closeTime < openTime) {
-                    if (currentTime >= openTime || currentTime <= closeTime) {
-                        isOpen = true;
-                    }
-                } else {
-                    // Horário normal (ex: 11:00 até 23:00)
-                    if (currentTime >= openTime && currentTime <= closeTime) {
-                        isOpen = true;
-                    }
-                }
-            }
-        }
-
-        //ENVIA A RESPOSTA PARA O CARDÁPIO DIGITAL (FRONTEND)
         res.json({
             success: true,
-            isOpen: isOpen, // <-- Isto é o que acende o botão verde no site do cliente!
-            
             store: { 
                 id: loja.id, 
                 name: loja.name, 
                 slug: loja.slug, 
                 cnpj: loja.cnpj, 
-                logoUrl: configuracoes.logoUrl || loja.logoUrl || '' 
+                logoUrl: loja.logoUrl 
             },
-            
             isManualFechado: configuracoes.isManualFechado || false,
             deliveryFee: configuracoes.deliveryFee || 0,
             cashbackPercent: configuracoes.cashbackPercent || 0,
@@ -1092,7 +1050,7 @@ app.get('/api/settings', async (req, res) => {
             tipPercentage: configuracoes.tipPercentage || 10,
             
             logoUrl: configuracoes.logoUrl || loja.logoUrl || '',
-            coverImageUrl: configuracoes.coverImageUrl || '',       // <-- A IMAGEM DO HEADER DO CARDÁPIO
+            coverImageUrl: configuracoes.coverImageUrl || '',
             totemCoverImageUrl: configuracoes.totemCoverImageUrl || '',
             promoBannerUrl: configuracoes.promoBannerUrl || '',
             promoBannerLink: configuracoes.promoBannerLink || '',
@@ -1105,24 +1063,23 @@ app.get('/api/settings', async (req, res) => {
             youtubeLiveId: configuracoes.youtubeLiveId || '',
             ajudaVideoLinks: configuracoes.ajudaVideoLinks || ''
         });
-
     } catch (error) {
         console.error("[ERRO GET SETTINGS]:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
 // =========================================================
-// SALVAR AS CONFIGURAÇÕES NO BANCO DE DADOS
+//  SALVAR AS CONFIGURAÇÕES (ANTI-GHOSTING)
 // =========================================================
 app.put('/api/settings', async (req, res) => {
     try {
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
         if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        const loja = await prisma.loja.findUnique({ where: { slug: storeSlug } });
+        const loja = await prisma.loja.findFirst({ where: { slug: storeSlug } });
         if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        // Extrai TODOS os dados novos do Frontend
         const { 
             isManualFechado, deliveryFee, cashbackPercent, schedule, tipPercentage,
             logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
@@ -1130,33 +1087,42 @@ app.put('/api/settings', async (req, res) => {
             youtubeLiveId, ajudaVideoLinks 
         } = req.body;
 
-        //Atualiza se já existir; Cria se for a primeira vez!
-        const updatedSettings = await prisma.settings.upsert({
-            where: { lojaId: loja.id }, // Usa o ID real da loja
-            update: {
-                isManualFechado,
-                deliveryFee: deliveryFee !== undefined ? Number(deliveryFee) : undefined,
-                cashbackPercent: cashbackPercent !== undefined ? Number(cashbackPercent) : undefined,
-                schedule: schedule || undefined,
-                tipPercentage: tipPercentage !== undefined ? Number(tipPercentage) : undefined,
-                logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
-                ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
-                youtubeLiveId, ajudaVideoLinks
-            },
-            create: {
-                lojaId: loja.id,
-                isManualFechado: isManualFechado || false,
-                deliveryFee: deliveryFee ? Number(deliveryFee) : 0,
-                cashbackPercent: cashbackPercent ? Number(cashbackPercent) : 0,
-                schedule: schedule || undefined,
-                tipPercentage: tipPercentage ? Number(tipPercentage) : 10,
-                logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
-                ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
-                youtubeLiveId, ajudaVideoLinks
-            }
+        // Monta o pacote de dados limpo
+        const dataToSave = {
+            isManualFechado: isManualFechado || false,
+            deliveryFee: deliveryFee !== undefined ? Number(deliveryFee) : 0,
+            cashbackPercent: cashbackPercent !== undefined ? Number(cashbackPercent) : 0,
+            schedule: schedule || null,
+            tipPercentage: tipPercentage !== undefined ? Number(tipPercentage) : 10,
+            logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
+            ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
+            youtubeLiveId, ajudaVideoLinks
+        };
+
+        // Procura a linha existente primeiro
+        const configuracoesAtuais = await prisma.settings.findFirst({
+            where: { lojaId: loja.id }
         });
 
-        res.json({ success: true, message: "Configurações salvas!" });
+        let updatedSettings;
+
+        if (configuracoesAtuais) {
+            // Se existir, atualiza usando o ID EXATO daquela linha (ignora o lojaId para não dar erro)
+            updatedSettings = await prisma.settings.update({
+                where: { id: configuracoesAtuais.id },
+                data: dataToSave
+            });
+        } else {
+            // Se não existir, cria a primeira
+            updatedSettings = await prisma.settings.create({
+                data: {
+                    lojaId: loja.id,
+                    ...dataToSave
+                }
+            });
+        }
+
+        res.json({ success: true, message: "Configurações salvas de forma definitiva!" });
     } catch (error) {
         console.error("[ERRO PUT SETTINGS]:", error);
         res.status(500).json({ success: false, error: error.message });
