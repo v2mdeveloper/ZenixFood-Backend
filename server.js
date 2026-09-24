@@ -1027,31 +1027,55 @@ app.get("/api/settings", async (req, res) => {
     });
 });
 
-app.put("/api/settings", async (req, res) => {
+// Exemplo de como a sua rota no backend deve estar:
+app.put('/api/settings', async (req, res) => {
     try {
-        const currentSettings = await getSettings(req.lojaId);
-        const newSettings = { ...currentSettings, ...req.body };
-        
-        // INTELIGÊNCIA: Sincroniza o logo com a tabela principal para o Painel Master e o App lerem corretamente!
-        if (req.body.logoUrl !== undefined) {
-            await prisma.loja.update({
-                where: { id: req.lojaId },
-                data: { logoUrl: req.body.logoUrl }
-            }).catch(() => {}); // Ignora se não houver mudança
-        }
+        const storeId = req.headers['x-store-id'] || req.storeId; // Conforme a sua auth
 
-        await prisma.systemConfig.upsert({
-            where: { key_lojaId: { key: "settings", lojaId: req.lojaId } },
-            update: { data: JSON.stringify(newSettings) },
-            create: {
-                key: "settings",
-                lojaId: req.lojaId,
-                data: JSON.stringify(newSettings),
-            },
+        // 1. Você DEVE extrair as novas propriedades do req.body aqui:
+        const { 
+            logoUrl, 
+            coverImageUrl, 
+            totemCoverImageUrl, 
+            ifoodLink, 
+            ninetyNineFoodLink, 
+            isManualFechado, 
+            deliveryFee, 
+            cashbackPercent, 
+            promoBannerUrl, 
+            promoBannerLink, 
+            youtubeLiveId, 
+            printerName, 
+            aboutUsText, 
+            schedule,
+            ajudaVideoLinks // <-- Este é o campo usado pela página AjudaTab
+        } = req.body;
+
+        // 2. E passá-las para o banco de dados na hora do update:
+        await db.Settings.update({
+            where: { storeId: storeId },
+            data: {
+                logoUrl,
+                coverImageUrl,          // <-- OBRIGATÓRIO PARA A CAPA SALVAR
+                totemCoverImageUrl,     // <-- OBRIGATÓRIO PARA O TOTEM
+                ifoodLink,
+                ninetyNineFoodLink,
+                isManualFechado,
+                deliveryFee,
+                cashbackPercent,
+                promoBannerUrl,
+                promoBannerLink,
+                youtubeLiveId,          // <-- OBRIGATÓRIO PARA A LIVE SALVAR
+                printerName,
+                aboutUsText,
+                schedule,
+                ajudaVideoLinks         // <-- OBRIGATÓRIO PARA OS VÍDEOS DE AJUDA
+            }
         });
-        res.json({ success: true, settings: newSettings });
+
+        res.json({ success: true, message: "Configurações salvas!" });
     } catch (error) {
-        res.status(500).json({ error: "Erro DB" });
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
