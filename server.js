@@ -1030,9 +1030,15 @@ app.get("/api/settings", async (req, res) => {
 // Exemplo de como a sua rota no backend deve estar:
 app.put('/api/settings', async (req, res) => {
     try {
-        const storeId = req.headers['x-loja-slug'] || req.headers['x-store-id'];
+        // 1. Pega o slug da loja vindo do Frontend (ex: 'teste01')
+        const storeSlug = req.headers['x-loja-slug'];
+        if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        // Extrai todos os campos que o Frontend está a mandar
+        // 2. Acha a Loja real no Banco de Dados para pegar o ID correto
+        const loja = await prisma.loja.findUnique({ where: { slug: storeSlug } });
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada no sistema" });
+
+        // 3. Extrai TODOS os dados enviados pelo Frontend
         const { 
             isManualFechado, deliveryFee, cashbackPercent, schedule, tipPercentage,
             logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
@@ -1040,33 +1046,38 @@ app.put('/api/settings', async (req, res) => {
             youtubeLiveId, ajudaVideoLinks 
         } = req.body;
 
-        // Atualiza a tabela Settings
-        await prisma.settings.update({
-            where: { lojaId: lojaId },
-            data: {
+        // 4. Usa o UPSERT: Atualiza se já existir, Cria se for a primeira vez!
+        const updatedSettings = await prisma.settings.upsert({
+            where: { 
+                lojaId: loja.id // Usa o ID real da loja, não o slug
+            },
+            update: {
                 isManualFechado,
-                deliveryFee: deliveryFee != null ? Number(deliveryFee) : undefined,
-                cashbackPercent: cashbackPercent != null ? Number(cashbackPercent) : undefined,
+                deliveryFee: deliveryFee !== undefined ? Number(deliveryFee) : undefined,
+                cashbackPercent: cashbackPercent !== undefined ? Number(cashbackPercent) : undefined,
                 schedule,
-                tipPercentage: tipPercentage != null ? Number(tipPercentage) : undefined,
-                logoUrl,
-                coverImageUrl,
-                totemCoverImageUrl,
-                promoBannerUrl,
-                promoBannerLink,
-                ifoodLink,
-                ninetyNineFoodLink,
-                aboutUsText,
-                printerName,
-                smartPosProvider,
-                youtubeLiveId,
-                ajudaVideoLinks
+                tipPercentage: tipPercentage !== undefined ? Number(tipPercentage) : undefined,
+                logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
+                ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
+                youtubeLiveId, ajudaVideoLinks
+            },
+            create: {
+                lojaId: loja.id,
+                isManualFechado: isManualFechado || false,
+                deliveryFee: deliveryFee ? Number(deliveryFee) : 0,
+                cashbackPercent: cashbackPercent ? Number(cashbackPercent) : 0,
+                schedule,
+                tipPercentage: tipPercentage ? Number(tipPercentage) : 10,
+                logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
+                ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
+                youtubeLiveId, ajudaVideoLinks
             }
         });
 
-        res.json({ success: true, message: "Configurações salvas com sucesso!" });
+        res.json({ success: true, message: "Configurações salvas com sucesso!", settings: updatedSettings });
     } catch (error) {
-        console.error("Erro ao salvar settings:", error);
+        // Se der erro, ele vai imprimir no terminal do Render para sabermos exatamente o que foi!
+        console.error("[ERRO GRAVE NO SETTINGS PUT]:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
