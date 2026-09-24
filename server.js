@@ -1017,14 +1017,62 @@ app.delete("/api/product-groups/:id", async (req, res) => {
     }
 });
 
-app.get("/api/settings", async (req, res) => {
-    const isOpen = await checkStoreStatus(req.lojaId);
-    res.json({ 
-        ...(await getSettings(req.lojaId)), 
-        isOpen,
-        success: true,
-        store: req.lojaInfo
-    });
+//Busca as configurações quando o sistema carrega
+app.get('/api/settings', async (req, res) => {
+    try {
+        // Pega o slug da loja vindo do FrontEnd
+        const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
+        if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
+
+        // Acha a loja E INCLUI a tabela Settings (É aqui que a mágica acontece!)
+        const loja = await prisma.loja.findUnique({
+            where: { slug: storeSlug },
+            include: { 
+                settings: true //Puxa a tabela Settings inteira junto com a loja!
+            } 
+        });
+
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
+
+        // Se a loja ainda não tiver settings, cria um objeto vazio para não dar erro
+        const configuracoes = loja.settings || {};
+
+        // Monta a resposta enviando TUDO na raiz, do jeito exato que o seu Frontend espera
+        res.json({
+            success: true,
+            store: { 
+                id: loja.id, 
+                name: loja.name, 
+                slug: loja.slug, 
+                cnpj: loja.cnpj, 
+                logoUrl: loja.logoUrl 
+            },
+
+            isManualFechado: configuracoes.isManualFechado || false,
+            deliveryFee: configuracoes.deliveryFee || 0,
+            cashbackPercent: configuracoes.cashbackPercent || 0,
+            schedule: configuracoes.schedule || null,
+            tipPercentage: configuracoes.tipPercentage || 10,
+            
+            logoUrl: configuracoes.logoUrl || loja.logoUrl || '',
+            coverImageUrl: configuracoes.coverImageUrl || '',
+            totemCoverImageUrl: configuracoes.totemCoverImageUrl || '',
+            promoBannerUrl: configuracoes.promoBannerUrl || '',
+            promoBannerLink: configuracoes.promoBannerLink || '',
+            ifoodLink: configuracoes.ifoodLink || '',
+            ninetyNineFoodLink: configuracoes.ninetyNineFoodLink || '',
+            aboutUsText: configuracoes.aboutUsText || '',
+            
+            printerName: configuracoes.printerName || '',
+            smartPosProvider: configuracoes.smartPosProvider || 'none',
+            youtubeLiveId: configuracoes.youtubeLiveId || '',
+            ajudaVideoLinks: configuracoes.ajudaVideoLinks || ''
+        });
+
+    } catch (error) {
+        console.error("[ERRO GET SETTINGS]:", error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // Exemplo de como a sua rota no backend deve estar:
