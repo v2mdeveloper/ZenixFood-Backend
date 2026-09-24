@@ -441,13 +441,34 @@ model MovimentacaoEstoque {
 }
 
 model Settings {
-  id              String   @id @default(cuid())
-  lojaId          String
-  loja            Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
-  isManualFechado Boolean  @default(false)
-  deliveryFee     Float    @default(0)
-  cashbackPercent Int      @default(0)
-  schedule        Json?    
+  id                  String   @id @default(cuid())
+  lojaId              String   @unique
+  loja                Loja     @relation(fields: [lojaId], references: [id], onDelete: Cascade)
+  
+  // Operacional e Financeiro
+  isManualFechado     Boolean  @default(false)
+  deliveryFee         Float    @default(0)
+  cashbackPercent     Int      @default(0)
+  schedule            Json?    
+  tipPercentage       Float    @default(10) // Usado no RhTab para a comissão/taxa de serviço
+
+  //Identidade Visual e Imagens
+  logoUrl             String?
+  coverImageUrl       String?
+  totemCoverImageUrl  String?
+  promoBannerUrl      String?
+  promoBannerLink     String?
+  
+  //Links, Textos e Delivery
+  ifoodLink           String?
+  ninetyNineFoodLink  String?
+  aboutUsText         String?  @db.Text // @db.Text permite textos maiores para o "Sobre Nós"
+
+  //Integrações de Hardware, POS e Vídeo
+  printerName         String?
+  smartPosProvider    String?  // Usado para saber qual maquininha o Totem e App chamam (Stone, PagSeguro, etc)
+  youtubeLiveId       String?
+  ajudaVideoLinks     String?  @db.Text // Salva os links dos vídeos da Universidade Zenix
 }
 
 model FiscalConfig {

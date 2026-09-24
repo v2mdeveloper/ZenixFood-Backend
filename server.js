@@ -1030,51 +1030,43 @@ app.get("/api/settings", async (req, res) => {
 // Exemplo de como a sua rota no backend deve estar:
 app.put('/api/settings', async (req, res) => {
     try {
-        const storeId = req.headers['x-store-id'] || req.storeId; // Conforme a sua auth
+        const storeId = req.headers['x-loja-slug'] || req.headers['x-store-id'];
 
-        // 1. Você DEVE extrair as novas propriedades do req.body aqui:
+        // Extrai todos os campos que o Frontend está a mandar
         const { 
-            logoUrl, 
-            coverImageUrl, 
-            totemCoverImageUrl, 
-            ifoodLink, 
-            ninetyNineFoodLink, 
-            isManualFechado, 
-            deliveryFee, 
-            cashbackPercent, 
-            promoBannerUrl, 
-            promoBannerLink, 
-            youtubeLiveId, 
-            printerName, 
-            aboutUsText, 
-            schedule,
-            ajudaVideoLinks // <-- Este é o campo usado pela página AjudaTab
+            isManualFechado, deliveryFee, cashbackPercent, schedule, tipPercentage,
+            logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
+            ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
+            youtubeLiveId, ajudaVideoLinks 
         } = req.body;
 
-        // 2. E passá-las para o banco de dados na hora do update:
-        await db.Settings.update({
-            where: { storeId: storeId },
+        // Atualiza a tabela Settings
+        await prisma.settings.update({
+            where: { lojaId: lojaId },
             data: {
-                logoUrl,
-                coverImageUrl,          // <-- OBRIGATÓRIO PARA A CAPA SALVAR
-                totemCoverImageUrl,     // <-- OBRIGATÓRIO PARA O TOTEM
-                ifoodLink,
-                ninetyNineFoodLink,
                 isManualFechado,
-                deliveryFee,
-                cashbackPercent,
+                deliveryFee: deliveryFee != null ? Number(deliveryFee) : undefined,
+                cashbackPercent: cashbackPercent != null ? Number(cashbackPercent) : undefined,
+                schedule,
+                tipPercentage: tipPercentage != null ? Number(tipPercentage) : undefined,
+                logoUrl,
+                coverImageUrl,
+                totemCoverImageUrl,
                 promoBannerUrl,
                 promoBannerLink,
-                youtubeLiveId,          // <-- OBRIGATÓRIO PARA A LIVE SALVAR
-                printerName,
+                ifoodLink,
+                ninetyNineFoodLink,
                 aboutUsText,
-                schedule,
-                ajudaVideoLinks         // <-- OBRIGATÓRIO PARA OS VÍDEOS DE AJUDA
+                printerName,
+                smartPosProvider,
+                youtubeLiveId,
+                ajudaVideoLinks
             }
         });
 
-        res.json({ success: true, message: "Configurações salvas!" });
+        res.json({ success: true, message: "Configurações salvas com sucesso!" });
     } catch (error) {
+        console.error("Erro ao salvar settings:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
