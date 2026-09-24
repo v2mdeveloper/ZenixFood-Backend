@@ -1017,27 +1017,25 @@ app.delete("/api/product-groups/:id", async (req, res) => {
     }
 });
 
-//Busca as configurações quando o sistema carrega
+// =========================================================
+// BUSCAR AS CONFIGURAÇÕES (CARREGAR A TELA)
+// =========================================================
 app.get('/api/settings', async (req, res) => {
     try {
-        // Pega o slug da loja vindo do FrontEnd
+        // 1. Pega o slug da loja vindo do FrontEnd
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
         if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        // Acha a loja E INCLUI a tabela Settings (É aqui que a mágica acontece!)
-        const loja = await prisma.loja.findUnique({
-            where: { slug: storeSlug },
-            include: { 
-                settings: true //Puxa a tabela Settings inteira junto com a loja!
-            } 
-        });
-
+        // 2. Acha a loja no banco
+        const loja = await prisma.loja.findUnique({ where: { slug: storeSlug } });
         if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        // Se a loja ainda não tiver settings, cria um objeto vazio para não dar erro
-        const configuracoes = loja.settings || {};
+        // 3. Busca as configurações DIRETAMENTE pelo ID da loja!
+        const configuracoes = await prisma.settings.findUnique({
+            where: { lojaId: loja.id }
+        }) || {}; // Se não existir, retorna um objeto vazio para não quebrar a tela
 
-        // Monta a resposta enviando TUDO na raiz, do jeito exato que o seu Frontend espera
+        // 4. Monta a resposta enviando TUDO, exatamente como o React espera
         res.json({
             success: true,
             store: { 
@@ -1047,7 +1045,6 @@ app.get('/api/settings', async (req, res) => {
                 cnpj: loja.cnpj, 
                 logoUrl: loja.logoUrl 
             },
-
             isManualFechado: configuracoes.isManualFechado || false,
             deliveryFee: configuracoes.deliveryFee || 0,
             cashbackPercent: configuracoes.cashbackPercent || 0,
@@ -1075,18 +1072,18 @@ app.get('/api/settings', async (req, res) => {
     }
 });
 
-// Exemplo de como a sua rota no backend deve estar:
+// =========================================================
+// SALVAR AS CONFIGURAÇÕES NO BANCO DE DADOS
+// =========================================================
 app.put('/api/settings', async (req, res) => {
     try {
-        // 1. Pega o slug da loja vindo do Frontend (ex: 'teste01')
-        const storeSlug = req.headers['x-loja-slug'];
+        const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
         if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        // 2. Acha a Loja real no Banco de Dados para pegar o ID correto
         const loja = await prisma.loja.findUnique({ where: { slug: storeSlug } });
-        if (!loja) return res.status(404).json({ error: "Loja não encontrada no sistema" });
+        if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        // 3. Extrai TODOS os dados enviados pelo Frontend
+        // Extrai TODOS os dados novos do Frontend
         const { 
             isManualFechado, deliveryFee, cashbackPercent, schedule, tipPercentage,
             logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
@@ -1094,16 +1091,14 @@ app.put('/api/settings', async (req, res) => {
             youtubeLiveId, ajudaVideoLinks 
         } = req.body;
 
-        // 4. Usa o UPSERT: Atualiza se já existir, Cria se for a primeira vez!
+        //Atualiza se já existir; Cria se for a primeira vez!
         const updatedSettings = await prisma.settings.upsert({
-            where: { 
-                lojaId: loja.id // Usa o ID real da loja, não o slug
-            },
+            where: { lojaId: loja.id }, // Usa o ID real da loja
             update: {
                 isManualFechado,
                 deliveryFee: deliveryFee !== undefined ? Number(deliveryFee) : undefined,
                 cashbackPercent: cashbackPercent !== undefined ? Number(cashbackPercent) : undefined,
-                schedule,
+                schedule: schedule || undefined,
                 tipPercentage: tipPercentage !== undefined ? Number(tipPercentage) : undefined,
                 logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
                 ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
@@ -1114,7 +1109,7 @@ app.put('/api/settings', async (req, res) => {
                 isManualFechado: isManualFechado || false,
                 deliveryFee: deliveryFee ? Number(deliveryFee) : 0,
                 cashbackPercent: cashbackPercent ? Number(cashbackPercent) : 0,
-                schedule,
+                schedule: schedule || undefined,
                 tipPercentage: tipPercentage ? Number(tipPercentage) : 10,
                 logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
                 ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
@@ -1122,10 +1117,9 @@ app.put('/api/settings', async (req, res) => {
             }
         });
 
-        res.json({ success: true, message: "Configurações salvas com sucesso!", settings: updatedSettings });
+        res.json({ success: true, message: "Configurações salvas!" });
     } catch (error) {
-        // Se der erro, ele vai imprimir no terminal do Render para sabermos exatamente o que foi!
-        console.error("[ERRO GRAVE NO SETTINGS PUT]:", error);
+        console.error("[ERRO PUT SETTINGS]:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
