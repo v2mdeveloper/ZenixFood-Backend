@@ -1022,29 +1022,69 @@ app.delete("/api/product-groups/:id", async (req, res) => {
 // =========================================================
 app.get('/api/settings', async (req, res) => {
     try {
-        // 1. Pega o slug da loja vindo do FrontEnd
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
-        if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
+        if (!storeSlug) return res.status(400).json({ error: "Slug ausente" });
 
-        // 2. Acha a loja no banco
-        const loja = await prisma.loja.findUnique({ where: { slug: storeSlug } });
+        const loja = await prisma.loja.findUnique({
+            where: { slug: storeSlug },
+            include: { settings: true }
+        });
+
         if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        // 3. Busca as configurações DIRETAMENTE pelo ID da loja!
-        const configuracoes = await prisma.settings.findUnique({
-            where: { lojaId: loja.id }
-        }) || {}; // Se não existir, retorna um objeto vazio para não quebrar a tela
+        const configuracoes = loja.settings || {};
 
-        // 4. Monta a resposta enviando TUDO, exatamente como o React espera
+        //LÓGICA VITAL: VERIFICAR SE A LOJA ESTÁ ABERTA AGORA
+        let isOpen = false;
+        
+        // Se a loja não foi fechada manualmente no botão vermelho do Admin...
+        if (!configuracoes.isManualFechado) {
+            const now = new Date();
+            const currentDay = now.getDay(); // 0 = Domingo, 1 = Segunda...
+            const schedule = configuracoes.schedule || {};
+            const todaySchedule = schedule[currentDay];
+
+            // Se o dia de hoje estiver marcado para abrir na tabela de horários...
+            if (todaySchedule && todaySchedule.isOpen) {
+                const currentTime = now.getHours() * 60 + now.getMinutes(); // Tempo atual em minutos
+                
+                // Converte hora "18:00" em minutos (1080)
+                const parseTime = (timeStr) => {
+                    if (!timeStr) return 0;
+                    const [h, m] = timeStr.split(':').map(Number);
+                    return h * 60 + m;
+                };
+
+                const openTime = parseTime(todaySchedule.open);
+                const closeTime = parseTime(todaySchedule.close);
+
+                // Lógica de horário que atravessa a meia-noite (ex: 18:00 até 02:00)
+                if (closeTime < openTime) {
+                    if (currentTime >= openTime || currentTime <= closeTime) {
+                        isOpen = true;
+                    }
+                } else {
+                    // Horário normal (ex: 11:00 até 23:00)
+                    if (currentTime >= openTime && currentTime <= closeTime) {
+                        isOpen = true;
+                    }
+                }
+            }
+        }
+
+        //ENVIA A RESPOSTA PARA O CARDÁPIO DIGITAL (FRONTEND)
         res.json({
             success: true,
+            isOpen: isOpen, // <-- Isto é o que acende o botão verde no site do cliente!
+            
             store: { 
                 id: loja.id, 
                 name: loja.name, 
                 slug: loja.slug, 
                 cnpj: loja.cnpj, 
-                logoUrl: loja.logoUrl 
+                logoUrl: configuracoes.logoUrl || loja.logoUrl || '' 
             },
+            
             isManualFechado: configuracoes.isManualFechado || false,
             deliveryFee: configuracoes.deliveryFee || 0,
             cashbackPercent: configuracoes.cashbackPercent || 0,
@@ -1052,7 +1092,7 @@ app.get('/api/settings', async (req, res) => {
             tipPercentage: configuracoes.tipPercentage || 10,
             
             logoUrl: configuracoes.logoUrl || loja.logoUrl || '',
-            coverImageUrl: configuracoes.coverImageUrl || '',
+            coverImageUrl: configuracoes.coverImageUrl || '',       // <-- A IMAGEM DO HEADER DO CARDÁPIO
             totemCoverImageUrl: configuracoes.totemCoverImageUrl || '',
             promoBannerUrl: configuracoes.promoBannerUrl || '',
             promoBannerLink: configuracoes.promoBannerLink || '',
@@ -1071,7 +1111,6 @@ app.get('/api/settings', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
-
 // =========================================================
 // SALVAR AS CONFIGURAÇÕES NO BANCO DE DADOS
 // =========================================================
