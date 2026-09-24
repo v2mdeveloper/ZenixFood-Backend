@@ -1017,32 +1017,58 @@ app.delete("/api/product-groups/:id", async (req, res) => {
     }
 });
 
-// =========================================================
-// BUSCAR AS CONFIGURAÇÕES (CARREGAR A TELA)
-// =========================================================
 app.get('/api/settings', async (req, res) => {
     try {
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
         if (!storeSlug) return res.status(400).json({ error: "Slug da loja ausente" });
 
-        // Usa findFirst para não quebrar caso existam lojas duplicadas por acidente
         const loja = await prisma.loja.findFirst({ where: { slug: storeSlug } });
         if (!loja) return res.status(404).json({ error: "Loja não encontrada" });
 
-        // Usa findFirst para forçar a leitura da primeira configuração encontrada
         const configuracoes = await prisma.settings.findFirst({
             where: { lojaId: loja.id }
         }) || {};
 
+        let isOpen = false;
+        
+        if (!configuracoes.isManualFechado) {
+            const now = new Date();
+            const currentDay = now.getDay();
+            const schedule = configuracoes.schedule || {};
+            const todaySchedule = schedule[currentDay];
+
+            if (todaySchedule && todaySchedule.isOpen) {
+                const currentTime = now.getHours() * 60 + now.getMinutes(); 
+                
+                const parseTime = (timeStr) => {
+                    if (!timeStr) return 0;
+                    const [h, m] = timeStr.split(':').map(Number);
+                    return h * 60 + m;
+                };
+
+                const openTime = parseTime(todaySchedule.open);
+                const closeTime = parseTime(todaySchedule.close);
+
+                if (closeTime < openTime) {
+                    if (currentTime >= openTime || currentTime <= closeTime) isOpen = true;
+                } else {
+                    if (currentTime >= openTime && currentTime <= closeTime) isOpen = true;
+                }
+            }
+        }
+
         res.json({
             success: true,
+            isOpen: isOpen,
+            
             store: { 
                 id: loja.id, 
                 name: loja.name, 
                 slug: loja.slug, 
                 cnpj: loja.cnpj, 
-                logoUrl: loja.logoUrl 
+                logoUrl: configuracoes.logoUrl || loja.logoUrl || '' 
             },
+            
             isManualFechado: configuracoes.isManualFechado || false,
             deliveryFee: configuracoes.deliveryFee || 0,
             cashbackPercent: configuracoes.cashbackPercent || 0,
@@ -1061,7 +1087,15 @@ app.get('/api/settings', async (req, res) => {
             printerName: configuracoes.printerName || '',
             smartPosProvider: configuracoes.smartPosProvider || 'none',
             youtubeLiveId: configuracoes.youtubeLiveId || '',
-            ajudaVideoLinks: configuracoes.ajudaVideoLinks || ''
+            ajudaVideoLinks: configuracoes.ajudaVideoLinks || '',
+
+        
+            supportPhone: configuracoes.supportPhone || '',
+            promoTitle1: configuracoes.promoTitle1 || '💰 Cashback Automático',
+            promoText1: configuracoes.promoText1 || 'A cada pedido finalizado no site, você ganha um percentual de volta na sua carteira digital. Esse saldo pode ser acumulado e usado para abater o valor das suas próximas compras.',
+            promoTitle2: configuracoes.promoTitle2 || '🎟️ Cupons Raspadinha',
+            promoText2: configuracoes.promoText2 || 'Fique de olho na sua entrega! Nós enviamos raspadinhas com códigos premiados junto com o lanche. Para usar, basta digitar o código no campo "🏷️ Cupom de Desconto" dentro da sua sacola.',
+            promoWarningText: configuracoes.promoWarningText || 'As promoções não são cumulativas. Em um mesmo pedido, você deve escolher entre usar o seu Saldo de Cashback OU aplicar um Cupom de Desconto.'
         });
     } catch (error) {
         console.error("[ERRO GET SETTINGS]:", error);
@@ -1069,9 +1103,6 @@ app.get('/api/settings', async (req, res) => {
     }
 });
 
-// =========================================================
-//  SALVAR AS CONFIGURAÇÕES (ANTI-GHOSTING)
-// =========================================================
 app.put('/api/settings', async (req, res) => {
     try {
         const storeSlug = req.headers['x-loja-slug'] || req.headers['x-store-id'];
@@ -1084,10 +1115,10 @@ app.put('/api/settings', async (req, res) => {
             isManualFechado, deliveryFee, cashbackPercent, schedule, tipPercentage,
             logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
             ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
-            youtubeLiveId, ajudaVideoLinks 
+            youtubeLiveId, ajudaVideoLinks,
+            supportPhone, promoTitle1, promoText1, promoTitle2, promoText2, promoWarningText
         } = req.body;
 
-        // Monta o pacote de dados limpo
         const dataToSave = {
             isManualFechado: isManualFechado || false,
             deliveryFee: deliveryFee !== undefined ? Number(deliveryFee) : 0,
@@ -1096,10 +1127,10 @@ app.put('/api/settings', async (req, res) => {
             tipPercentage: tipPercentage !== undefined ? Number(tipPercentage) : 10,
             logoUrl, coverImageUrl, totemCoverImageUrl, promoBannerUrl, promoBannerLink,
             ifoodLink, ninetyNineFoodLink, aboutUsText, printerName, smartPosProvider,
-            youtubeLiveId, ajudaVideoLinks
+            youtubeLiveId, ajudaVideoLinks,
+            supportPhone, promoTitle1, promoText1, promoTitle2, promoText2, promoWarningText
         };
 
-        // Procura a linha existente primeiro
         const configuracoesAtuais = await prisma.settings.findFirst({
             where: { lojaId: loja.id }
         });
@@ -1107,13 +1138,11 @@ app.put('/api/settings', async (req, res) => {
         let updatedSettings;
 
         if (configuracoesAtuais) {
-            // Se existir, atualiza usando o ID EXATO daquela linha (ignora o lojaId para não dar erro)
             updatedSettings = await prisma.settings.update({
                 where: { id: configuracoesAtuais.id },
                 data: dataToSave
             });
         } else {
-            // Se não existir, cria a primeira
             updatedSettings = await prisma.settings.create({
                 data: {
                     lojaId: loja.id,
