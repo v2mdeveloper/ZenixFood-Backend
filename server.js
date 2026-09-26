@@ -37,13 +37,14 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_key";
 
 // ==============================================================
-// 1. MIDDLEWARE DE SAAS (MULTI-TENANT) E TRAVA DE INADIMPLÊNCIA
+// 1. MIDDLEWARE DE SAAS (MULTI-TENANT) E TRAVAS DE ACESSO
 // ==============================================================
 app.use(async (req, res, next) => {
+    // Rotas do Master e Webhooks não passam pela validação de loja
     if (req.path.startsWith("/api/master")) return next();
     if (req.path === "/api/webhook") return next();
 
-    // LIBERA O TOTEM: Deixa as requisições públicas passarem direto sem barrar
+    // LIBERA O TOTEM E CARDÁPIO EXTERNO: Deixa passar (O cliente não tem culpa)
     if (req.path.includes("/public/")) return next();
 
     const lojaSlug = req.headers["x-loja-slug"] || req.headers["x-store-id"];
@@ -67,9 +68,18 @@ app.use(async (req, res, next) => {
         }
 
         if (loja) {
-            // Trava do Master
+            // Trava de Inadimplência
             if ((loja.status === 'BLOCKED' || loja.isActive === false) && !req.path.includes('/api/admin/store-info')) {
                 return res.status(402).json({ error: "Acesso bloqueado por pendências financeiras." });
+            }
+
+            // TRAVA: CONTRATO NÃO ASSINADO
+            // Bloqueia qualquer rota administrativa (PDV, KDS, Configurações) se o contrato não estiver validado.
+            if (loja.contratoAssinado === false && !req.path.includes('/api/admin/store-info')) {
+                return res.status(403).json({ 
+                    error: "SISTEMA BLOQUEADO JURIDICAMENTE", 
+                    details: "O contrato de prestação de serviços não foi assinado ou validado. Regularize a situação junto ao seu representante." 
+                });
             }
 
             req.lojaId = loja.id;
@@ -487,12 +497,32 @@ app.get('/api/super/users', async (req, res) => {
       include: { managedStores: true },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(users);
+
+    // OTIMIZAÇÃO CRÍTICA DE PERFORMANCE:
+    // Remove o 'contratoUrl' (Base64 do PDF) tanto do Franqueado (AdminUser)
+    // quanto das lojas que ele gerencia (managedStores).
+    const usersLight = users.map(user => {
+        // Separa o contrato do Franqueado e a lista de lojas do resto dos dados
+        const { contratoUrl: contratoUrlUser, managedStores, ...dadosUser } = user;
+        
+        // Faz uma varredura nas lojas vinculadas e também arranca o PDF delas
+        const lojasLight = (managedStores || []).map(store => {
+            const { contratoUrl: contratoUrlStore, ...dadosStore } = store;
+            return dadosStore;
+        });
+
+        return {
+            ...dadosUser,
+            managedStores: lojasLight
+        };
+    });
+
+    res.json(usersLight);
   } catch (error) {
+    console.error("Erro ao buscar usuários:", error);
     res.status(500).json({ error: 'Erro ao buscar usuários do sistema.' });
   }
 });
-
 
 // ============================================================================
 // Buscar apenas as lojas (para preencher o select de vínculos)
@@ -515,7 +545,7 @@ app.get('/api/super/stores', async (req, res) => {
 // Criar novo usuário Master/Franqueado
 app.post('/api/super/users', async (req, res) => {
   try {
-    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds } = req.body;
+    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds, contratoAssinado } = req.body;
     
     // Criptografa a senha antes de salvar
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -523,7 +553,10 @@ app.post('/api/super/users', async (req, res) => {
     const newUser = await prisma.adminUser.create({
       data: {
         name, cpf, email, password: hashedPassword, cep, address, neighborhood, city, uf, role,
-        managedStores: { connect: managedStoreIds.map(id => ({ id })) }
+        // 🔥 Trava de contrato da franquia
+        contratoAssinado: Boolean(contratoAssinado), 
+        dataAssinatura: contratoAssinado ? new Date() : null,
+        managedStores: { connect: (managedStoreIds || []).map(id => ({ id })) }
       }
     });
     res.json({ success: true, user: newUser });
@@ -537,10 +570,16 @@ app.post('/api/super/users', async (req, res) => {
 app.put('/api/super/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds } = req.body;
+    const { name, cpf, email, password, cep, address, neighborhood, city, uf, role, managedStoreIds, contratoAssinado } = req.body;
     
     let updateData = { name, cpf, email, cep, address, neighborhood, city, uf, role };
     
+    // 🔥 Atualiza a situação do contrato
+    if (contratoAssinado !== undefined) {
+        updateData.contratoAssinado = Boolean(contratoAssinado);
+        updateData.dataAssinatura = contratoAssinado ? new Date() : null;
+    }
+
     // Só atualiza a senha se o Super Master tiver digitado uma nova
     if (password && password.trim() !== '') {
       updateData.password = await bcrypt.hash(password, 10);
@@ -550,13 +589,37 @@ app.put('/api/super/users/:id', async (req, res) => {
       where: { id },
       data: {
         ...updateData,
-        managedStores: { set: managedStoreIds.map(storeId => ({ id: storeId })) } // Atualiza os vínculos
+        managedStores: { set: (managedStoreIds || []).map(storeId => ({ id: storeId })) } // Atualiza os vínculos
       }
     });
     res.json({ success: true, user: updatedUser });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao atualizar dados do usuário.' });
   }
+});
+
+//Rota de Upload do PDF do Contrato (Franquia)
+app.post('/api/super/users/:id/contrato', upload.single("contrato_pdf"), async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!req.file) return res.status(400).json({ error: "O arquivo PDF é obrigatório." });
+
+        // Converte o PDF para base64 para armazenar no banco de dados (SaaS sem AWS S3 no momento)
+        const pdfBase64 = `data:application/pdf;base64,${req.file.buffer.toString('base64')}`;
+
+        await prisma.adminUser.update({
+            where: { id },
+            data: { 
+                contratoUrl: pdfBase64,
+                contratoAssinado: true,
+                dataAssinatura: new Date()
+            }
+        });
+
+        res.json({ success: true, message: "Contrato arquivado com sucesso e Franqueado liberado!" });
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao arquivar o contrato." });
+    }
 });
 
 // Bloquear / Desbloquear Usuário Master
@@ -586,12 +649,27 @@ app.get("/api/master/lojas", async (req, res) => {
     const stores = await dbModel.findMany({
       include: { 
         adminUser: {
-          select: { id: true, name: true, email: true } 
+          select: { 
+            id: true, 
+            name: true, 
+            email: true,
+            contratoAssinado: true // Traz o status jurídico do franqueado
+          } 
         }
       },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(stores);
+
+    // OTIMIZAÇÃO CRÍTICA DE PERFORMANCE:
+    // Remove o 'contratoUrl' (Base64 do PDF) da listagem geral. 
+    // Como PDFs são arquivos grandes, enviar o PDF de 100 lojas de uma vez 
+    // travaria o servidor e o navegador. O PDF só será puxado sob demanda.
+    const storesLight = stores.map(store => {
+        const { contratoUrl, ...dadosLeves } = store;
+        return dadosLeves;
+    });
+
+    res.json(storesLight);
   } catch (error) {
     console.error("Erro ao buscar lojas:", error);
     res.status(500).json({ error: "Erro interno ao listar lojas." });
@@ -605,8 +683,19 @@ app.post("/api/master/lojas", async (req, res) => {
             slug, razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal,
             endereco, emailEmpresa, telefoneEmpresa, regimeTributario,
             nomeResponsavel, cpfResponsavel, emailResponsavel, senhaResponsavel,
-            modulosAtivos, plan, monthlyFee // 🎯 AGORA RECEBE O PLANO E O VALOR
+            modulosAtivos, plan, monthlyFee, adminUserId, 
+            contratoAssinado // 🎯 NOVO CAMPO
         } = req.body;
+
+        // 🔥 TRAVA DO FRANQUEADO: Verifica se o Franqueado assinou o contrato antes de o deixar criar lojas
+        if (adminUserId) {
+            const franqueado = await prisma.adminUser.findUnique({ where: { id: adminUserId } });
+            if (franqueado && franqueado.contratoAssinado === false) {
+                return res.status(403).json({ 
+                    error: "Sua conta de Franqueado está bloqueada para novas vendas. O seu contrato de revenda com a ZenixFood não foi assinado." 
+                });
+            }
+        }
 
         const existingLoja = await prisma.loja.findFirst({
             where: { OR: [{ slug }, { cnpj }, { emailResponsavel }] },
@@ -615,22 +704,29 @@ app.post("/api/master/lojas", async (req, res) => {
         if (existingLoja)
             return res.status(400).json({ error: "Slug, CNPJ ou E-mail do Responsável já estão em uso." });
 
+        const isAssinado = Boolean(contratoAssinado);
+
         const novaLoja = await prisma.loja.create({
             data: {
                 slug: slug.toLowerCase().trim().replace(/\s+/g, "-"),
                 razaoSocial, cnpj, inscricaoEstadual, inscricaoMunicipal, endereco,
                 emailEmpresa, telefoneEmpresa, regimeTributario,
                 nomeResponsavel, cpfResponsavel, emailResponsavel, senhaResponsavel,
-                plan: plan || "STANDARD",               // SALVA O PLANO
-                monthlyFee: Number(monthlyFee) || 0.0,  // SALVA O VALOR DA MENSALIDADE
-                status: "ACTIVE",                       // STATUS ATIVO POR PADRÃO
+                plan: plan || "STANDARD",               
+                monthlyFee: Number(monthlyFee) || 0.0,  
+                status: "ACTIVE",                       
                 modulosAtivos: modulosAtivos || JSON.stringify(["PDV", "KDS", "SALAO", "ESTOQUE", "FINANCEIRO", "FISCAL"]),
+                adminUserId: adminUserId || null,
+                
+                // 🔥 TRAVA DE CONTRATO DA LOJA
+                contratoAssinado: isAssinado,
+                dataAssinatura: isAssinado ? new Date() : null
             },
         });
 
+        // ... O resto da criação de funcionário e settings continua igual ...
         const hashedAdminPassword = await bcrypt.hash(senhaResponsavel, 10);
         
-        // Dá permissão total ("gestao") ao dono da loja
         const perfilAdmin = await prisma.accessProfile.create({
             data: { lojaId: novaLoja.id, name: "Gerente Master", permissions: JSON.stringify(["gestao"]) },
         });
@@ -653,6 +749,75 @@ app.post("/api/master/lojas", async (req, res) => {
     } catch (error) {
         console.error("ERRO MASTER CRIAR LOJA:", error);
         res.status(500).json({ error: "Erro ao gerar a base da Loja.", details: error.message });
+    }
+});
+
+// EDITAR DADOS DA LOJA E VINCULAR FRANQUEADO / PLANOS
+app.put('/api/master/lojas/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const dbModel = prisma.loja || prisma.store;
+
+    const dataToUpdate = {};
+    
+    const allowedFields = [
+      'slug', 'razaoSocial', 'cnpj', 'inscricaoEstadual', 'inscricaoMunicipal', 
+      'emailEmpresa', 'telefoneEmpresa', 'nomeResponsavel', 'cpfResponsavel', 
+      'emailResponsavel', 'endereco', 'logoUrl', 'plan', 'planoSaaSId', 'temSuporte',
+      'contratoAssinado' // 🎯 PERMITIR EDIÇÃO
+    ];
+
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        dataToUpdate[field] = req.body[field];
+      }
+    });
+
+    if (req.body.monthlyFee !== undefined) dataToUpdate.monthlyFee = Number(req.body.monthlyFee || 0);
+    if (req.body.valorSuporte !== undefined) dataToUpdate.valorSuporte = Number(req.body.valorSuporte || 0);
+    if (req.body.senhaResponsavel && req.body.senhaResponsavel.trim() !== '') {
+      dataToUpdate.senhaResponsavel = req.body.senhaResponsavel;
+    }
+    if (req.body.adminUserId !== undefined) {
+      dataToUpdate.adminUserId = (req.body.adminUserId === '' || req.body.adminUserId === 'null' || !req.body.adminUserId) ? null : req.body.adminUserId;
+    }
+
+    if (dataToUpdate.contratoAssinado !== undefined) {
+        dataToUpdate.contratoAssinado = Boolean(dataToUpdate.contratoAssinado);
+        dataToUpdate.dataAssinatura = dataToUpdate.contratoAssinado ? new Date() : null;
+    }
+
+    const updatedLoja = await dbModel.update({
+      where: { id },
+      data: dataToUpdate
+    });
+
+    res.json({ success: true, loja: updatedLoja });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message || "Erro desconhecido" });
+  }
+});
+
+// Rota de Upload do PDF do Contrato (Loja / Cliente Final)
+app.post('/api/master/lojas/:id/contrato', upload.single("contrato_pdf"), async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!req.file) return res.status(400).json({ error: "O ficheiro PDF é obrigatório." });
+
+        const pdfBase64 = `data:application/pdf;base64,${req.file.buffer.toString('base64')}`;
+
+        await prisma.loja.update({
+            where: { id },
+            data: { 
+                contratoUrl: pdfBase64,
+                contratoAssinado: true,
+                dataAssinatura: new Date()
+            }
+        });
+
+        res.json({ success: true, message: "Contrato arquivado e loja liberada!" });
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao arquivar o contrato." });
     }
 });
 

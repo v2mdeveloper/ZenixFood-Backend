@@ -50,6 +50,11 @@ model Loja {
   temSuporte         Boolean  @default(false)
   valorSuporte       Float    @default(0.0) // Valor extra adicionado pelo Franqueado
 
+  // CONTRATO E LIBERAÇÃO JURÍDICA COM O CLIENTE FINAL (NOVO)
+  contratoAssinado   Boolean   @default(false)
+  contratoUrl        String?   @db.Text
+  dataAssinatura     DateTime?
+
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -194,6 +199,11 @@ model AdminUser {
   isActive     Boolean  @default(true)
   role         String   @default("MASTER") // Pode ser "SUPER_MASTER" ou "MASTER"
   
+  // 🔥 CONTRATO DE FRANQUIA / REVENDA (NOVO)
+  contratoAssinado Boolean   @default(false)
+  contratoUrl      String?   @db.Text
+  dataAssinatura   DateTime?
+
   // Relacionamento: Quais lojas este usuário gerencia?
   managedStores Loja[]
   
