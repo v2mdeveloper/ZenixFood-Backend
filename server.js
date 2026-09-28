@@ -5587,6 +5587,42 @@ app.delete('/api/super/planos/:id', async (req, res) => {
   }
 });
 
+
+// ============================================================================
+// VISUALIZAÇÃO DE CONTRATOS (AUDITORIA EM PDF)
+// ============================================================================
+
+// 1. Baixar/Ver Contrato do Franqueado
+app.get('/api/super/users/:id/contrato', async (req, res) => {
+  try {
+    const user = await prisma.adminUser.findUnique({ 
+      where: { id: req.params.id }, 
+      select: { contratoUrl: true } 
+    });
+    if (!user || !user.contratoUrl) return res.status(404).json({ error: "O arquivo do contrato não foi encontrado no banco de dados." });
+    
+    res.json({ success: true, contratoUrl: user.contratoUrl });
+  } catch (error) { 
+    res.status(500).json({ error: "Erro ao buscar contrato." }); 
+  }
+});
+
+// 2. Baixar/Ver Contrato do Inquilino (Restaurante)
+app.get('/api/master/lojas/:id/contrato', async (req, res) => {
+  try {
+    const dbModel = prisma.loja || prisma.store;
+    const loja = await dbModel.findUnique({ 
+      where: { id: req.params.id }, 
+      select: { contratoUrl: true } 
+    });
+    if (!loja || !loja.contratoUrl) return res.status(404).json({ error: "O arquivo do contrato não foi encontrado no banco de dados." });
+    
+    res.json({ success: true, contratoUrl: loja.contratoUrl });
+  } catch (error) { 
+    res.status(500).json({ error: "Erro ao buscar contrato." }); 
+  }
+});
+
 // ============================================================================
 // MÓDULO DE RECEPÇÃO E EVENTOS (HOSTESS)
 // ============================================================================
